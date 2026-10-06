@@ -1,0 +1,9 @@
+{
+  "name": "spec-studio",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/model.test.mjs tests/features.test.mjs",
+    "import:chat": "python tools/pdf2json.py \"../../39.채팅/투네이션채팅_상세기획서_v0.1.pdf\" -o samples/chat-spec-v0.1.tnspec.json"
+  }
+}

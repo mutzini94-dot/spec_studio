@@ -1,0 +1,163 @@
+/* PPT 기능 이식 (목록 · 회전 · 자르기 · 표 범위 · 눈금자 · 정렬 보기 · 찾기 · 색 고르기 · 메모) */
+
+/* ---------- 단락 · 목록 ---------- */
+.tx .p { position: relative; min-height: 1em; }
+.tx .p.li[data-m]::before { content: attr(data-m); display: inline-block; width: 14px; margin-left: -14px; padding-right: 0; text-align: left; }
+.run-link { color: #1d5fd1; text-decoration: underline; cursor: pointer; }
+.tx sup, .tx sub { font-size: .68em; line-height: 0; }
+.n-text.fit-grow { height: auto !important; }
+.n-text.fit-shrink { overflow: hidden; }
+
+/* ---------- 이미지 ---------- */
+.img-box { position: absolute; inset: 0; overflow: hidden; }
+.img-box > img { width: 100%; height: 100%; display: block; user-select: none; }
+.img-border { position: absolute; inset: 0; pointer-events: none; box-sizing: border-box; }
+.crop-ghost { position: absolute; opacity: .35; pointer-events: none; }
+.crop-full { position: absolute; pointer-events: none; outline: calc(1px * var(--iz)) dashed #9aa3ad; }
+.sel-box.crop-box { outline: calc(2px * var(--iz)) solid #ffb020; }
+.handle.crop-h { background: #ffb020; border-color: #fff; }
+
+/* ---------- 손잡이: 회전 · 조정 · 연결점 · 표 경계 ---------- */
+.handle.rot { border-radius: 50%; cursor: grab; background: #fff; }
+.handle.adj { background: #ffd400; border-color: #8a6d00; border-radius: 2px; transform: rotate(45deg); cursor: move; }
+.handle.h-any { cursor: move; }
+.cpt { position: absolute; width: calc(8px * var(--iz)); height: calc(8px * var(--iz)); margin: calc(-4px * var(--iz)) 0 0 calc(-4px * var(--iz)); border-radius: 50%; background: #fff; border: calc(1.5px * var(--iz)) solid #22c55e; }
+.cpt.on { background: #22c55e; transform: scale(1.4); }
+.tb-col-h { position: absolute; cursor: col-resize; pointer-events: auto; }
+.tb-row-h { position: absolute; cursor: row-resize; pointer-events: auto; }
+.tb-col-h:hover, .tb-row-h:hover { background: rgba(47, 128, 255, .35); }
+
+/* ---------- 안내선 · 격자 · 눈금자 ---------- */
+.uguide { position: absolute; pointer-events: auto; z-index: 2; }
+.uguide::after { content: ""; position: absolute; background: #00c2ff; }
+.uguide.v { top: 0; bottom: 0; width: calc(7px * var(--iz)); margin-left: calc(-3.5px * var(--iz)); cursor: col-resize; }
+.uguide.v::after { top: 0; bottom: 0; left: 50%; width: calc(1px * var(--iz)); }
+.uguide.h { left: 0; right: 0; height: calc(7px * var(--iz)); margin-top: calc(-3.5px * var(--iz)); cursor: row-resize; }
+.uguide.h::after { left: 0; right: 0; top: 50%; height: calc(1px * var(--iz)); }
+#world.show-grid .fwrap .overlay { background-image: linear-gradient(to right, rgba(0, 120, 255, .13) 1px, transparent 1px), linear-gradient(to bottom, rgba(0, 120, 255, .13) 1px, transparent 1px); background-size: var(--grid) var(--grid); }
+.ruler, .ruler-corner { display: none; position: absolute; z-index: 15; }
+.with-rulers .ruler, .with-rulers .ruler-corner { display: block; }
+#ruler-top { left: 18px; top: 0; cursor: row-resize; }
+#ruler-left { left: 0; top: 18px; cursor: col-resize; }
+.ruler-corner { left: 0; top: 0; width: 18px; height: 18px; background: #2b2d31; }
+.with-rulers #canvas { top: 18px; left: 18px; }
+
+/* ---------- 프레임 상태 ---------- */
+.fwrap.frame-off .frame { opacity: .45; }
+.tag-hidden { background: #6b7280; color: #fff; border-radius: 3px; padding: 0 5px; font-weight: 600; }
+#canvas.painting, #canvas.painting .node { cursor: copy !important; }
+
+/* ---------- 메모 막대 ---------- */
+.notes-bar { position: absolute; left: 0; right: 0; bottom: 0; z-index: 18; background: var(--panel); border-top: 1px solid var(--line); }
+.notes-bar .nb-head { display: flex; align-items: center; justify-content: space-between; padding: 5px 12px; cursor: pointer; color: var(--tx2); font-size: 11px; }
+.notes-bar .nb-tg::after { content: "▲ 펼치기"; }
+.notes-bar.open .nb-tg::after { content: "▼ 접기"; }
+.notes-bar textarea { display: none; width: 100%; height: 96px; resize: vertical; background: var(--bg); color: var(--tx); border: 0; border-top: 1px solid var(--line); padding: 8px 12px; outline: none; font: 12px/1.6 var(--ui); }
+.notes-bar.open textarea { display: block; }
+.notes-bar:not(.hidden) ~ .zoombar { bottom: 40px; }
+.notes-bar.open:not(.hidden) ~ .zoombar { bottom: 140px; }
+#center:has(.notes-bar:not(.hidden)) #canvas { bottom: 28px; }
+#center:has(.notes-bar.open:not(.hidden)) #canvas { bottom: 125px; }
+
+/* ---------- 정렬 보기 ---------- */
+#canvas.sorter { background: #d9dce1; }
+.sorter-root { padding: 8px 0 60px; min-width: 900px; }
+.sorter-hint { color: #5d6470; font-size: 12px; margin-bottom: 10px; }
+.sort-page { margin-bottom: 22px; border-radius: 10px; padding: 4px 6px 10px; }
+.sort-page.drop-page { box-shadow: inset 0 0 0 2px var(--acc); }
+.sort-page header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; color: #333a45; }
+.sort-page header b { font-size: 14px; }
+.sort-page header span { color: #6b7280; font-size: 11px; }
+.sort-page header button { margin-left: auto; border: 0; border-radius: 6px; padding: 3px 10px; background: #fff; color: #2f6fe0; font-weight: 600; }
+.sort-grid { display: flex; flex-wrap: wrap; gap: 16px; min-height: 40px; }
+.sort-item { position: relative; cursor: pointer; border-radius: 6px; padding: 4px; }
+.sort-item.on { box-shadow: 0 0 0 2px var(--sel); background: rgba(47, 128, 255, .08); }
+.sort-item.off .sort-thumb { opacity: .4; }
+.sort-item.dragging { opacity: .4; }
+.sort-item.drop-l::before, .sort-item.drop-r::after { content: ""; position: absolute; top: 0; bottom: 0; width: 3px; background: var(--acc); border-radius: 2px; }
+.sort-item.drop-l::before { left: -10px; }
+.sort-item.drop-r::after { right: -10px; }
+.sort-thumb { position: relative; overflow: hidden; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .2); pointer-events: none; }
+.sort-thumb .frame { position: absolute; left: 0; top: 0; box-shadow: none; }
+.sort-cap { display: flex; gap: 6px; align-items: center; margin-top: 5px; font-size: 11px; color: #333a45; max-width: 192px; }
+.sort-cap em { font-style: normal; font-weight: 700; color: #6b7280; }
+.sort-cap span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.sort-acts { position: absolute; top: 8px; right: 8px; display: none; gap: 3px; }
+.sort-item:hover .sort-acts { display: flex; }
+.sort-acts button { border: 0; border-radius: 4px; background: rgba(17, 24, 39, .8); color: #fff; padding: 2px 6px; font-size: 11px; }
+
+/* ---------- 찾기 · 바꾸기 ---------- */
+.find-panel { position: absolute; top: 10px; right: 14px; z-index: 25; width: 330px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px; box-shadow: 0 10px 30px rgba(0, 0, 0, .35); }
+.fp-row { display: flex; gap: 4px; align-items: center; margin-bottom: 6px; }
+.fp-row input { flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 5px; padding: 5px 8px; outline: none; }
+.fp-row input:focus { border-color: var(--acc); }
+.fp-row button { border: 0; border-radius: 5px; background: var(--bg); padding: 5px 8px; white-space: nowrap; }
+.fp-row button:hover { background: var(--line); }
+.fp-cnt { color: var(--tx3); font-size: 11px; min-width: 38px; text-align: right; }
+.fp-rep { display: none; }
+.find-panel.with-rep .fp-rep { display: flex; }
+.fp-opt { display: flex; gap: 6px; align-items: center; color: var(--tx2); font-size: 11px; margin: 0 2px 6px; }
+.fp-list { max-height: 240px; overflow: auto; }
+.fp-it { padding: 5px 7px; border-radius: 5px; cursor: pointer; display: flex; flex-direction: column; gap: 1px; }
+.fp-it:hover { background: var(--panel2); }
+.fp-it.on { background: rgba(76, 141, 255, .25); }
+.fp-it small { color: var(--tx3); font-size: 10px; }
+.fp-it mark { background: #ffd400; color: #111; border-radius: 2px; }
+
+/* ---------- 색 고르기 ---------- */
+.cswatch { cursor: pointer; padding: 0 7px; gap: 7px; outline: none; }
+.cswatch i { width: 16px; height: 16px; border-radius: 4px; flex: none; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .25); }
+.cswatch i.none { background: repeating-linear-gradient(45deg, #555 0 3px, #333 3px 6px) !important; }
+.cswatch .cl { font-size: 11px; color: var(--tx2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cpop { position: fixed; z-index: 300; width: 228px; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 8px; box-shadow: 0 12px 34px rgba(0, 0, 0, .45); }
+.cp-h { color: var(--tx2); font-size: 10px; margin: 4px 2px 5px; display: flex; justify-content: space-between; }
+.cp-h small { color: var(--tx3); }
+.cp-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; margin-bottom: 4px; }
+.cp-grid button { height: 26px; border: 0; border-radius: 5px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .18); }
+.cp-grid button.on, .cp-grid button:hover { box-shadow: 0 0 0 2px var(--acc); }
+.cp-row { display: flex; gap: 5px; margin-top: 6px; }
+.cp-row input[type=color] { width: 34px; height: 28px; border: 0; padding: 0; background: none; }
+.cp-row .cp-hex { flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 5px; padding: 4px 6px; outline: none; }
+.cp-none { border: 0; border-radius: 5px; background: var(--bg); padding: 0 8px; }
+.theme-list { display: grid; gap: 4px; margin-bottom: 6px; }
+.theme-row { display: flex; gap: 6px; align-items: center; }
+.theme-row input[type=color] { width: 26px; height: 24px; border: 0; padding: 0; background: none; flex: none; }
+.theme-row .tn { flex: 1; min-width: 0; background: var(--bg); border: 1px solid transparent; border-radius: 4px; padding: 3px 6px; outline: none; }
+.theme-row code { color: var(--tx3); font-size: 10px; width: 64px; overflow: hidden; text-overflow: ellipsis; }
+.theme-row .ib { height: 22px; min-width: 22px; padding: 0 4px; }
+
+/* ---------- 도형 메뉴 ---------- */
+.shape-pop { width: 252px; padding: 8px; }
+.sm-g { color: var(--tx3); font-size: 10px; margin: 6px 2px 4px; }
+.sm-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 3px; }
+.menu-pop .sm-grid button { justify-content: center; padding: 6px 0; color: var(--tx); }
+.menu-pop .sm-grid button:hover { background: var(--acc2); }
+.tb-btn svg { display: block; }
+
+/* ---------- 미리보기 메모 ---------- */
+#present .pnotes { position: fixed; left: 50%; bottom: 60px; transform: translateX(-50%); width: min(900px, 90vw); max-height: 120px; overflow: auto; background: rgba(30, 31, 34, .95); color: #e3e5e8; border-radius: 8px; padding: 10px 14px; white-space: pre-wrap; font-size: 13px; line-height: 1.6; }
+#present .pnotes.hidden { display: none; }
+
+/* ---------- PPTX · PDF 올리기 ---------- */
+.drop-zone { display: flex; flex-direction: column; gap: 4px; align-items: center; justify-content: center; text-align: center; padding: 22px 16px; border: 2px dashed var(--line); border-radius: 12px; background: var(--panel2); cursor: pointer; outline: none; }
+.drop-zone:hover, .drop-zone:focus, .drop-zone.over { border-color: var(--acc); background: rgba(76, 141, 255, .1); }
+.drop-zone small { color: var(--tx3); }
+.imp-progress { height: 6px; border-radius: 3px; background: var(--bg); overflow: hidden; }
+.imp-progress i { display: block; width: 40%; height: 100%; background: var(--acc); border-radius: 3px; animation: imp 1.1s ease-in-out infinite; }
+@keyframes imp { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
+.imp-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.imp-stats div { background: var(--panel2); border-radius: 8px; padding: 10px; text-align: center; }
+.imp-stats b { display: block; font-size: 20px; }
+.imp-stats small { color: var(--tx3); }
+.imp-warn { display: grid; gap: 4px; }
+.imp-warn div { background: rgba(255, 176, 32, .12); border-left: 3px solid #ffb020; padding: 6px 10px; border-radius: 4px; color: var(--tx); }
+
+/* 패널에만 보이는 Description (화면 위 번호 없음) */
+.n-description.no-marker { display: none !important; }
+
+/* 선택한 객체: 이동 커서 (끌기 · 방향키로 이동) */
+.edit-mode .node.sel-on, .edit-mode .node.sel-on *, .edit-mode .sel-on .conn .hit, .edit-mode .sel-on .shp-hit { cursor: move; }
+.edit-mode .node.sel-on.nofill, .edit-mode .node.sel-on.nofill svg { pointer-events: auto; }
+.edit-mode .node.sel-cell, .edit-mode .node.sel-cell * { cursor: cell; }
+.edit-mode .node.editing-node, .edit-mode .node.editing-node * { cursor: text; }
+#canvas:not(.tool-select) .node.sel-on, #canvas:not(.tool-select) .node.sel-on * { cursor: crosshair; }

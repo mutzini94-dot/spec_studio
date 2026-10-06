@@ -1,0 +1,10 @@
+# 사내 기획서에서 가져온 샘플 문서 (공개 저장소에 올리지 않음)
+samples/
+# 원본 HTML 빌드 스크립트 보관본 (로컬 경로 · 사내 문서 내용 포함)
+tools/pdfkit/legacy_build_chat_html.py
+
+__pycache__/
+*.pyc
+node_modules/
+.DS_Store
+*.log

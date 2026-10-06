@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spec Studio — 투네이션 상세기획서</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap">
+<link rel="stylesheet" href="css/studio.css">
+<link rel="stylesheet" href="css/features.css">
+</head>
+<body>
+<div id="app">
+  <header id="top">
+    <div class="brand"><i></i>Spec Studio</div>
+    <div class="menu">
+      <button class="tb-btn" data-act="menu">파일 ▾</button>
+      <div class="menu-pop hidden">
+        <button data-act="home">새 문서 · 최근 문서 <span class="kbd"></span></button>
+        <button data-act="open">열기… <span class="kbd">.tnspec.json</span></button>
+        <hr>
+        <button data-act="save">저장 <span class="kbd">Ctrl+S</span></button>
+        <button data-act="saveas">다른 이름으로 저장 <span class="kbd">Ctrl+Shift+S</span></button>
+        <button data-act="json">JSON 내려받기</button>
+        <button data-act="print">인쇄 · PDF로 저장 <span class="kbd">프레임 = 1쪽</span></button>
+        <hr>
+        <button data-act="importfile">PPTX · PDF 가져오기… <span class="kbd">끌어다 놓기도 됨</span></button>
+        <button data-act="import">가져오기 도움말</button>
+        <button data-act="find">찾기 <span class="kbd">Ctrl+F</span></button>
+        <button data-act="replace">바꾸기 <span class="kbd">Ctrl+H</span></button>
+        <button data-act="check">문서 점검 (저장 → 다시 열기 검증)</button>
+        <button data-act="shortcuts">단축키</button>
+      </div>
+    </div>
+    <input id="doc-title" class="doc-title" title="문서 제목">
+    <div class="tb-sep"></div>
+    <button class="tb-btn" data-act="undo" title="실행 취소 (Ctrl+Z)">↶</button>
+    <button class="tb-btn" data-act="redo" title="다시 실행 (Ctrl+Shift+Z)">↷</button>
+    <div class="tb-sep"></div>
+    <button class="tb-btn" data-act="tool:select" title="선택 (V)">➤</button>
+    <button class="tb-btn" data-act="tool:text" title="글 (T)"><b>T</b></button>
+    <button class="tb-btn" data-act="tool:rect" title="사각형 (R)">□</button>
+    <button class="tb-btn" data-act="tool:ellipse" title="원 (O)">○</button>
+    <div class="menu">
+      <button class="tb-btn" data-act="menu" data-menu="shape" title="도형 라이브러리 (말풍선 · 블록 화살표 · 순서도)">◇ ▾</button>
+      <div class="menu-pop hidden shape-pop" id="shape-menu"></div>
+    </div>
+    <button class="tb-btn" data-act="tool:line" title="선 (L) — Shift: 45° 단위">╱</button>
+    <button class="tb-btn" data-act="tool:arrow" title="화살표 (A) — Shift: 45° 단위">↗</button>
+    <button class="tb-btn" data-act="tool:connector" title="연결선 (C) — 요소의 연결점(상하좌우)에 붙어요">⤳</button>
+    <button class="tb-btn" data-act="tool:table" title="표 (B)">▦</button>
+    <button class="tb-btn" data-act="tool:image" title="이미지 (I) — 붙여넣기 · 끌어다 놓기도 됩니다">▣</button>
+    <button class="tb-btn" data-act="tool:description" title="Description 번호 (D)" style="color:#ff6b6b">①</button>
+    <button class="tb-btn" data-act="tool:hotspot" title="인터랙션 영역 (H)">⚡</button>
+    <div class="tb-sep"></div>
+    <div class="menu">
+      <button class="tb-btn" data-act="menu">＋ 프레임 ▾</button>
+      <div class="menu-pop hidden">
+        <button data-act="frame:screen">화면 설계 <span class="kbd">Page Name · Description</span></button>
+        <button data-act="frame:policy">기본 정책 <span class="kbd">정책 표</span></button>
+        <button data-act="frame:history">개정 이력 <span class="kbd">Revision History</span></button>
+        <button data-act="frame:divider">간지 <span class="kbd">01 장 제목</span></button>
+        <button data-act="frame:cover">표지</button>
+        <button data-act="frame:end">THANK YOU</button>
+        <button data-act="frame:blank">빈 페이지</button>
+      </div>
+    </div>
+    <div class="menu">
+      <button class="tb-btn" data-act="menu" data-menu="view">보기 ▾</button>
+      <div class="menu-pop hidden" id="view-menu"></div>
+    </div>
+    <button class="tb-btn" data-act="sorter" title="정렬 보기 — 모든 프레임을 썸네일로 보고 끌어서 순서 바꾸기">⊞</button>
+    <button class="tb-btn" data-act="find" title="찾기 · 바꾸기 (Ctrl+F)">🔍</button>
+    <div class="tb-grow"></div>
+    <span id="save-state" class="save-state"></span>
+    <button class="tb-btn" data-act="present" title="미리보기 · 인터랙션 체험 (F5)">▶ 미리보기</button>
+  </header>
+  <aside id="left"></aside>
+  <main id="center">
+    <div id="canvas" class="tool-select">
+      <div id="comp-banner" class="comp-banner hidden"></div>
+      <div id="sizer"><div id="world"></div></div>
+    </div>
+    <canvas id="ruler-top" class="ruler" title="끌어내리면 가로 안내선"></canvas>
+    <canvas id="ruler-left" class="ruler" title="끌어오면 세로 안내선"></canvas>
+    <div class="ruler-corner"></div>
+    <div id="notes-bar" class="notes-bar hidden"><div class="nb-head"><span class="nb-title">📝 프레임 메모</span><span class="nb-tg"></span></div><textarea placeholder="이 프레임에 대한 메모 — 기획 의도, 개발 참고, 발표 노트 (미리보기에서 N)"></textarea></div>
+    <div class="zoombar" id="zoombar">
+      <button data-z="out" title="축소">−</button><button data-z="100" class="zv" id="zv" title="100%">100%</button><button data-z="in" title="확대">＋</button><button data-z="fit" title="너비 맞춤 (Shift+1)">⤢</button>
+    </div>
+  </main>
+  <aside id="right"></aside>
+</div>
+<script type="module">
+  import { boot } from './js/editor.js';
+  boot();
+</script>
+</body>
+</html>
