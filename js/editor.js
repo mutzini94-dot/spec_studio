@@ -6,6 +6,7 @@ import { LAYOUT_INFO, makeFrame } from './templates.js';
 import * as store from './store.js';
 import * as P from './panels.js';
 import * as V from './viewtools.js';
+import * as CM from './contextmenu.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const SNAP = 5;
@@ -1459,6 +1460,42 @@ function onDbl(e) {
   if (n.type === 'hotspot') { const t = $('#insp-hot-type'); if (t) t.focus(); }
 }
 
+// ---------- 오른쪽 클릭: 대상 고르기 → 메뉴 ----------
+function onContext(e) {
+  if (E.view === 'sorter') { const it = e.target.closest('.sort-item'); if (it) { e.preventDefault(); E.frameSel = it.dataset.fid; setActiveFrame(it.dataset.fid); CM.open(e, { kind: 'frame', fid: it.dataset.fid }); } return; }
+  if (E.editing && E.editing.el.contains(e.target)) return;   // 글 편집 중에는 브라우저 기본 메뉴(맞춤법 · 붙여넣기)
+  e.preventDefault();
+  finishEdit();
+  const label = e.target.closest('[data-flabel]');
+  if (label) { E.scope = null; select([], { frame: label.dataset.flabel }); CM.open(e, { kind: 'frame', fid: label.dataset.flabel }); return; }
+  const wrap = e.target.closest('.fwrap');
+  if (!wrap) return;
+  const fid = wrap.dataset.fw;
+  if (!E.compId) setActiveFrame(fid);
+  const p = toFrame(e, fid);
+  const hit = e.target.closest('[data-id]');
+  if (hit && E.idx.get(hit.dataset.id)) {
+    const id = selectable(hit.dataset.id, e.ctrlKey || e.metaKey);
+    if (!E.sel.includes(id)) select([id]);
+    const n = E.idx.get(id);
+    // 표: 고른 범위 밖의 칸을 눌렀으면 그 칸을 고른다
+    const td = e.target.closest('td');
+    if (n.type === 'table' && td && E.sel.length === 1) {
+      const r = +td.dataset.r, c = +td.dataset.c, rg = cellRange();
+      if (!rg || E.cell.id !== id || r < rg.r0 || r > rg.r1 || c < rg.c0 || c > rg.c1) { E.cell = { id, r, c, r2: r, c2: c }; markCell(); drawOverlay(); ui(); }
+    }
+    let mid = null;
+    if (n.type === 'instance') for (let el = e.target.closest('[data-mid]'); el; el = el.parentElement && el.parentElement.closest('[data-mid]')) if (el.classList.contains('n-text') || (el.classList.contains('n-shape') && el.querySelector('.tx'))) { mid = el.dataset.mid; break; }
+    CM.open(e, { kind: 'node', fid, id, mid, point: p });
+    return;
+  }
+  // 선택 상자 안 빈 곳 = 선택한 것에 대한 메뉴
+  const b = E.sel.length && frameOfNode(E.sel[0]) === fid ? selBox() : null;
+  if (b && p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h) { CM.open(e, { kind: 'node', fid, id: E.sel[0], point: p }); return; }
+  select([]);
+  CM.open(e, { kind: 'empty', fid, point: p });
+}
+
 function onHover(e) {
   if (E.drag || E.view === 'sorter') return;
   const hit = e.target.closest && e.target.closest('[data-id]');
@@ -1525,14 +1562,18 @@ export function duplicate() {
   const r = O.opsPaste(E.idx, pl, parent, 12, 12);
   if (commit(r.ops, '복제')) select(r.ids);
 }
-export function pastePayload(pl) {
+export function pastePayload(pl, at) {
   const fid = E.compId || E.activeFrame;
   if (!fid) { toast('붙여 넣을 프레임을 먼저 고르세요.'); return; }
   let parent = containerFor(fid).id;
   if (E.scope && frameOfNode(E.scope) === fid) parent = E.scope;
   // 같은 자리에 원본이 그대로 있으면 살짝 비켜서 붙인다
   const same = pl.doc === E.doc.id && pl.nodes.every((n) => { const o = E.idx.get(n.id); return o && frameOfNode(n.id) === fid && Math.abs(nodeBox(n.id).x - n.x) < 1; });
-  const r = O.opsPaste(E.idx, pl, parent, same ? 12 : 0, same ? 12 : 0);
+  let dx = same ? 12 : 0, dy = same ? 12 : 0;
+  if (at && pl.nodes.length) {   // 오른쪽 클릭한 자리에 왼쪽 위를 맞춰 붙이기
+    dx = at.x - Math.min(...pl.nodes.map((n) => n.x)); dy = at.y - Math.min(...pl.nodes.map((n) => n.y));
+  }
+  const r = O.opsPaste(E.idx, pl, parent, dx, dy);
   if (commit(r.ops, '붙여넣기')) select(r.ids);
 }
 
@@ -1910,6 +1951,7 @@ export function boot() {
   const c = canvas();
   c.addEventListener('pointerdown', onDown);
   c.addEventListener('dblclick', onDbl);
+  c.addEventListener('contextmenu', onContext);
   c.addEventListener('pointermove', onHover);
   c.addEventListener('pointerleave', () => { E.hoverId = null; drawOverlay(); });
   c.addEventListener('scroll', () => V.drawRulers(E));
