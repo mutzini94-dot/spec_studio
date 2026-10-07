@@ -131,7 +131,7 @@ export function textStyle(s = {}) {
   if (s.color) st.push('color:' + C(s.color));
   if (s.bold) st.push('font-weight:700');
   if (s.italic) st.push('font-style:italic');
-  if (s.underline) st.push('text-decoration:underline');
+  if (s.underline || s.strike) st.push('text-decoration:' + [s.underline && 'underline', s.strike && 'line-through'].filter(Boolean).join(' '));
   if (s.align) st.push('text-align:' + s.align);
   if (s.lineHeight) st.push('line-height:' + s.lineHeight);
   st.push('font-family:' + (FONTS[s.font] || FONTS.m));
@@ -139,6 +139,7 @@ export function textStyle(s = {}) {
   if (s.letter) st.push('letter-spacing:' + s.letter + 'px');
   if (s.shadow) st.push('text-shadow:0 1px 2px rgba(0,0,0,.35)');
   if (s.vertical) st.push('writing-mode:vertical-rl');
+  if (s.columns > 1) st.push('column-count:' + s.columns, 'column-gap:14px');
   const pad = s.pad;
   if (pad != null && pad !== 0) st.push('padding:' + (Array.isArray(pad) ? pad.map((v) => v + 'px').join(' ') : pad + 'px'));
   return st.join(';');

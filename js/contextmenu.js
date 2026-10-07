@@ -464,6 +464,24 @@ function place(m, x, y, flipX) {
   m.style.top = top + 'px';
 }
 
+// 임의 항목으로 메뉴 열기 (리본의 ▾ 단추 등)
+export function openItems(x, y, items, flipX) {
+  close();
+  root = document.createElement('div');
+  root.className = 'cm-root';
+  root.addEventListener('contextmenu', (ev) => ev.preventDefault());
+  document.body.appendChild(root);
+  const m = build(items, 0);
+  root.appendChild(m);
+  place(m, x, y, flipX);
+  setTimeout(() => {
+    document.addEventListener('pointerdown', outside, true);
+    window.addEventListener('keydown', onKey, true);
+    window.addEventListener('blur', close);
+  }, 0);
+}
+export { copySel, paste, forShape, rotateMenu };
+
 export function open(e, ctx) {
   close();
   const items = itemsFor(ctx);

@@ -1,0 +1,46 @@
+/* 홈 리본 (PowerPoint 홈 탭) */
+#app { grid-template-rows: 44px auto 1fr; }
+#ribbon { grid-column: 1 / 4; background: var(--panel); border-bottom: 1px solid var(--line); overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+#app.rb-collapsed #ribbon { display: none; }
+.rb-row { display: flex; align-items: stretch; min-width: max-content; padding: 4px 6px 0; height: 96px; box-sizing: border-box; }
+.rb-g { display: flex; flex-direction: column; padding: 0 8px; border-right: 1px solid var(--line); }
+.rb-body { flex: 1; display: flex; align-items: flex-start; gap: 4px; }
+.rb-lab { text-align: center; font-size: 11px; color: var(--tx3); padding: 3px 0 4px; white-space: nowrap; }
+.rb-col { display: flex; flex-direction: column; gap: 2px; justify-content: flex-start; }
+.rb-line { display: flex; align-items: center; gap: 2px; height: 30px; }
+.rb-sp { width: 6px; }
+.rb-grow { flex: 1; }
+
+.rb-b { border: 0; background: transparent; color: var(--tx); border-radius: 4px; height: 26px; min-width: 26px; padding: 0 5px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; white-space: nowrap; font-size: 12px; line-height: 1; }
+.rb-b:hover:not(:disabled) { background: var(--panel2); }
+.rb-b.on { background: rgba(76, 141, 255, .3); box-shadow: inset 0 0 0 1px var(--acc); }
+.rb-b:disabled, .rb-b.off { opacity: .35; cursor: default; }
+.rb-b.off:hover { background: transparent; }
+.rb-b.wide { justify-content: flex-start; height: 24px; padding: 0 6px; }
+.rb-b svg { flex: none; }
+.rb-big { flex-direction: column; height: 70px; min-width: 54px; padding: 4px 6px; gap: 4px; font-size: 12px; }
+.rb-big span { line-height: 1.15; text-align: center; }
+.rb-big.split { display: flex; flex-direction: column; align-items: stretch; gap: 0; padding: 0; height: 70px; }
+.rb-big.split .rb-b { border-radius: 4px 4px 0 0; height: 44px; }
+.rb-big.split .rb-blab { border-radius: 0 0 4px 4px; height: 26px; font-size: 12px; }
+.rb-big.split:hover { box-shadow: inset 0 0 0 1px var(--line); border-radius: 4px; }
+
+#rb-font, #rb-size { height: 26px; background: var(--bg); color: var(--tx); border: 1px solid var(--line); border-radius: 4px; padding: 0 6px; font-size: 12px; outline: none; }
+#rb-font { width: 132px; }
+#rb-size { width: 52px; }
+#rb-font:focus, #rb-size:focus { border-color: var(--acc); }
+#rb-font:disabled, #rb-size:disabled { opacity: .4; }
+#rb-font option { background: var(--panel2); }
+
+.rb-split { display: inline-flex; align-items: center; }
+.rb-split .rb-b { position: relative; padding: 0 4px; }
+.rb-split .rb-b.arr { min-width: 14px; padding: 0 2px; font-size: 9px; color: var(--tx2); }
+.rb-split .rb-b i { position: absolute; left: 4px; right: 4px; bottom: 3px; height: 3px; border-radius: 1px; }
+.rb-hl, .rb-fc { font-weight: 700; padding-bottom: 3px; }
+
+.rb-gal { display: flex; align-items: stretch; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); height: 70px; }
+.rb-gal-grid { display: grid; grid-template-columns: repeat(6, 24px); grid-auto-rows: 22px; padding: 2px; gap: 0; overflow: hidden; }
+.rb-gal-grid .rb-b { height: 22px; min-width: 22px; padding: 0; color: var(--tx2); }
+.rb-gal-grid .rb-b:hover { color: var(--tx); }
+.rb-gal-more { height: auto !important; min-width: 16px !important; border-left: 1px solid var(--line) !important; border-radius: 0 4px 4px 0 !important; font-size: 10px; color: var(--tx2); }
+.rb-collapse { align-self: flex-end; margin: 0 4px 6px; color: var(--tx3); }

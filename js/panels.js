@@ -6,6 +6,7 @@ import * as V from './viewtools.js';
 import { renderFrame, renderNode, FONT_NAMES, collectDescriptions, SHAPES, SHAPE_NAME, shapePath, CAPS, resolveColor, fitText } from './render.js';
 import { DOC_TEMPLATES, LAYOUT_INFO } from './templates.js';
 import * as store from './store.js';
+import * as CM from './contextmenu.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -50,7 +51,7 @@ export function init(e) {
       clearguides: () => E.activeFrame && V.clearGuides(E, E.activeFrame),
     }[a] || (() => {}))();
   });
-  document.addEventListener('pointerdown', (ev) => { if (!ev.target.closest('.menu')) closeMenus(); if (!ev.target.closest('.cpop, .cswatch')) closeColorPop(); });
+  document.addEventListener('pointerdown', (ev) => { const t = ev.target instanceof Element ? ev.target : null; if (!t || !t.closest('.menu')) closeMenus(); if (!t || !t.closest('.cpop, .cswatch, .rb-b')) closeColorPop(); });
   const title = $('#doc-title');
   title.addEventListener('change', () => { Ed.commit([{ op: 'set', id: 'doc', key: 'meta.title', value: title.value }], '문서 제목'); });
   title.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') title.blur(); });
@@ -127,16 +128,17 @@ export function renderLeft() {
       Ed.commit([{ op: 'remove', id: p.id }], '페이지 삭제');
     };
   });
+  const comp = Ed.currentComponent();
+  if (!comp && leftView() === 'slides') { renderSlides(L, st); return; }
   const ly = document.createElement('div');
   ly.id = 'layers';
-  const comp = Ed.currentComponent();
   const rows = [];
   if (comp) {
     rows.push(`<div class="sec-h">◆ ${esc(comp.name)} 원본</div>`);
     layerRows(comp.nodes, 0, rows);
   } else {
     const page = Ed.currentPage();
-    rows.push(`<div class="sec-h">레이어 <span class="kbd">${page ? page.frames.length : 0} 프레임</span></div>`);
+    rows.push(`<div class="sec-h">${viewSwitch()}<span class="kbd">${page ? page.frames.length : 0} 프레임</span></div>`);
     if (page) page.frames.forEach((f) => {
       const open = !E.collapsed.has(f.id);
       rows.push(`<div class="ly frame-row ${f.id === E.frameSel ? 'on' : ''} ${f.id === E.activeFrame ? 'active-frame' : ''} ${f.hidden ? 'is-hidden' : ''}" data-ly="${f.id}" data-frame="1" draggable="true" style="padding-left:2px">
@@ -149,6 +151,153 @@ export function renderLeft() {
   L.appendChild(ly);
   ly.scrollTop = st;
   bindLayerRows(ly);
+  bindViewSwitch(ly);
+}
+
+// ---------- 슬라이드 보기 (PowerPoint 썸네일 창) ----------
+function leftView() { try { return localStorage.getItem('tnspec:leftView') || 'slides'; } catch (e) { return 'slides'; } }
+function setLeftView(v) { try { localStorage.setItem('tnspec:leftView', v); } catch (e) { /* 무시 */ } renderLeft(); }
+function viewSwitch() {
+  const v = leftView();
+  return `<span class="vsw"><button data-lv="slides" class="${v === 'slides' ? 'on' : ''}" title="화면 단위 미리보기 (PowerPoint 슬라이드 창)">🖼 슬라이드</button><button data-lv="layers" class="${v === 'layers' ? 'on' : ''}" title="요소 목록 (레이어)">☰ 레이어</button></span>`;
+}
+function bindViewSwitch(root) { root.querySelectorAll('[data-lv]').forEach((b) => { b.onclick = (ev) => { ev.stopPropagation(); setLeftView(b.dataset.lv); }; }); }
+
+const THUMB_W = 184;
+const thumbCache = new Map();   // 프레임 id → { key, el }  (바뀐 프레임만 다시 그린다)
+let lastRevealed = null;
+function thumbFor(f, pno, fresh) {
+  const sc = THUMB_W / E.doc.size.w;
+  const c = thumbCache.get(f.id);
+  if (c && E.drag) return c.el;   // 드래그 중에는 다시 그리지 않음 (끝나면 반영)
+  const key = JSON.stringify(f) + '|' + pno + '|' + JSON.stringify(E.doc.meta) + '|' + JSON.stringify(E.doc.theme);
+  if (c && c.key === key) return c.el;
+  const holder = document.createElement('div');
+  holder.className = 'sl-thumb';
+  holder.style.cssText = `width:${THUMB_W}px;height:${Math.round(E.doc.size.h * sc)}px`;
+  const fr = renderFrame(f, { doc: E.doc, idx: E.idx, mode: 'present', pageNo: pno });
+  fr.style.transform = `scale(${sc})`;
+  fr.style.transformOrigin = '0 0';
+  holder.appendChild(fr);
+  thumbCache.set(f.id, { key, el: holder });
+  fresh.push(holder);
+  return holder;
+}
+
+function renderSlides(L, st) {
+  const box = document.createElement('div');
+  box.id = 'layers';
+  box.className = 'slides';
+  box.tabIndex = 0;
+  const nums = Ed.pageNumbers();
+  const fresh = [];
+  const head = document.createElement('div');
+  head.className = 'sec-h';
+  head.innerHTML = `${viewSwitch()}<span class="kbd">${E.idx.frames().length}장</span>`;
+  box.appendChild(head);
+  for (const page of E.doc.pages) {
+    const ph = document.createElement('div');
+    ph.className = 'sl-page' + (page.id === E.pageId ? ' cur' : '');
+    ph.dataset.page = page.id;
+    ph.innerHTML = `<span>${esc(page.name)}</span><small>${page.frames.length}장</small>`;
+    box.appendChild(ph);
+    for (const f of page.frames) {
+      const it = document.createElement('div');
+      it.className = 'sl-item' + (f.id === E.activeFrame && E.view === 'canvas' ? ' on' : '') + (f.id === E.frameSel ? ' fsel' : '') + (f.hidden ? ' off' : '');
+      it.dataset.fid = f.id;
+      it.draggable = true;
+      it.title = `${nums.get(f.id)}. ${f.name} · ${(LAYOUT_INFO[f.layout] || {}).name || f.layout}`;
+      it.innerHTML = `<div class="sl-num"><b>${nums.get(f.id)}</b>${f.hidden ? '<i title="숨긴 프레임 (미리보기 · 인쇄 제외)">🙈</i>' : ''}${f.notes ? '<i title="메모 있음">📝</i>' : ''}</div>`;
+      const right = document.createElement('div');
+      right.className = 'sl-body';
+      right.appendChild(thumbFor(f, nums.get(f.id), fresh));
+      right.insertAdjacentHTML('beforeend', `<div class="sl-name">${esc(f.name)}</div>`);
+      it.appendChild(right);
+      box.appendChild(it);
+    }
+  }
+  for (const id of [...thumbCache.keys()]) if (!E.idx.get(id)) thumbCache.delete(id);   // 지워진 프레임
+  L.appendChild(box);
+  box.scrollTop = st;
+  fresh.forEach((h) => fitText(h));
+  // 작업 중인 프레임이 바뀌면 목록에서 보이게
+  if (E.activeFrame !== lastRevealed) {
+    lastRevealed = E.activeFrame;
+    const on = box.querySelector('.sl-item.on');
+    if (on) on.scrollIntoView({ block: 'nearest' });
+  }
+  bindViewSwitch(box);
+  bindSlides(box);
+}
+
+function gotoFrame(fid) {
+  if (E.compId) Ed.exitComponent();
+  const pg = E.idx.pageOf(fid);
+  if (!pg) return;
+  if (E.view !== 'canvas') Ed.setView('canvas');
+  if (pg.id !== E.pageId) Ed.gotoPage(pg.id);
+  E.scope = null;
+  Ed.select([], { frame: fid });
+  Ed.scrollToFrame(fid);
+}
+
+function bindSlides(box) {
+  let dragId = null;
+  box.addEventListener('click', (e) => {
+    const ph = e.target.closest('.sl-page');
+    if (ph) { Ed.gotoPage(ph.dataset.page); return; }
+    const it = e.target.closest('.sl-item');
+    if (it) { gotoFrame(it.dataset.fid); const b = $('#layers'); if (b) b.focus({ preventScroll: true }); }
+  });
+  box.addEventListener('contextmenu', (e) => {
+    const it = e.target.closest('.sl-item');
+    if (!it) return;
+    e.preventDefault();
+    gotoFrame(it.dataset.fid);
+    CM.open(e, { kind: 'frame', fid: it.dataset.fid });
+  });
+  // 키보드: ↑↓ 이전 · 다음 화면, Delete 삭제 (PowerPoint와 같게)
+  box.addEventListener('keydown', (e) => {
+    const frames = E.idx.frames();
+    const i = frames.findIndex((f) => f.id === (E.frameSel || E.activeFrame));
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault(); e.stopPropagation();
+      const n = frames[Math.max(0, Math.min(frames.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))];
+      if (n) {
+        gotoFrame(n.id);
+        setTimeout(() => { const el = document.querySelector(`#layers .sl-item[data-fid="${n.id}"]`); if (el) el.scrollIntoView({ block: 'nearest' }); const b = $('#layers'); if (b) b.focus({ preventScroll: true }); }, 0);
+      }
+    } else if ((e.key === 'Delete' || e.key === 'Backspace') && i >= 0) {
+      e.preventDefault(); e.stopPropagation(); Ed.deleteFrame(frames[i].id);
+    }
+  });
+  // 끌어서 순서 바꾸기 · 다른 페이지로
+  box.addEventListener('dragstart', (e) => { const it = e.target.closest('.sl-item'); if (!it) return; dragId = it.dataset.fid; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragId); it.classList.add('dragging'); });
+  box.addEventListener('dragend', () => { dragId = null; box.querySelectorAll('.dragging, .drop-t, .drop-b, .drop-page').forEach((x) => x.classList.remove('dragging', 'drop-t', 'drop-b', 'drop-page')); });
+  box.addEventListener('dragover', (e) => {
+    if (!dragId) return;
+    e.preventDefault();
+    box.querySelectorAll('.drop-t, .drop-b, .drop-page').forEach((x) => x.classList.remove('drop-t', 'drop-b', 'drop-page'));
+    const it = e.target.closest('.sl-item');
+    if (it && it.dataset.fid !== dragId) { const r = it.getBoundingClientRect(); it.classList.add(e.clientY < r.top + r.height / 2 ? 'drop-t' : 'drop-b'); return; }
+    const ph = e.target.closest('.sl-page');
+    if (ph) ph.classList.add('drop-page');
+  });
+  box.addEventListener('drop', (e) => {
+    if (!dragId) return;
+    e.preventDefault();
+    const src = dragId;
+    const it = e.target.closest('.sl-item'), ph = e.target.closest('.sl-page');
+    let pageId = null, index = null;
+    if (it && it.dataset.fid !== src) {
+      const tgt = E.idx.get(it.dataset.fid), pg = E.idx.parentOf(tgt.id);
+      const r = it.getBoundingClientRect();
+      index = pg.frames.indexOf(tgt) + (e.clientY < r.top + r.height / 2 ? 0 : 1);
+      if (E.idx.parentOf(src) === pg && pg.frames.indexOf(E.idx.get(src)) < index) index--;
+      pageId = pg.id;
+    } else if (ph) { pageId = ph.dataset.page; index = 0; }
+    if (pageId) Ed.commit([{ op: 'move', id: src, parent: pageId, index }], '프레임 순서');
+  });
 }
 
 function layerRows(nodes, depth, out) {
@@ -353,8 +502,15 @@ function colorField(v, ids, key, opts = {}) {
     const ops = ids.map((id) => ({ op: 'set', id, key, value: val }));
     Ed.commit(ops, opts.label || '색 변경', merge);
   });
-  f.onclick = (ev) => {
-    ev.stopPropagation();
+  f.onclick = (ev) => { ev.stopPropagation(); openColorPopover(f, v, apply, Object.assign({ key }, opts)); };
+  return f;
+}
+
+// 색 고르기 팝오버 (속성 패널 · 리본에서 함께 씀). apply(value, mergeKey)
+export function openColorPopover(anchor, v, apply, opts = {}) {
+  const key = opts.key || 'c';
+  const shown = resolveColor(E.doc, v);
+  {
     closeColorPop();
     const pop = document.createElement('div');
     pop.className = 'cpop keep-edit';
@@ -364,8 +520,10 @@ function colorField(v, ids, key, opts = {}) {
       ${rec.length ? `<div class="cp-h">최근 사용</div><div class="cp-grid">${rec.map((c) => `<button data-v="${esc(c)}" title="${esc(c)}" style="background:${esc(c)}"></button>`).join('')}</div>` : ''}
       <div class="cp-h">기본</div><div class="cp-grid">${['#ffffff', '#f2f2f2', '#d9d9d9', '#a6a6a6', '#595959', '#000000', '#e53935', '#ff8a00', '#ffc107', '#22c55e', '#399eff', '#7b4dff'].map((c) => `<button data-v="${c}" title="${c}" style="background:${c}"></button>`).join('')}</div>
       <div class="cp-row"><input type="color" value="${toHex6(shown || '#000000')}"><input type="text" class="cp-hex" value="${esc(v && !v.startsWith('theme:') && v !== 'none' ? v : '')}" placeholder="#rrggbb">${opts.noNone ? '' : '<button data-v="none" class="cp-none">없음</button>'}</div>`;
+    if (opts.title) pop.insertAdjacentHTML('afterbegin', `<div class="cp-h" style="color:var(--tx)"><b>${esc(opts.title)}</b></div>`);
+    if (opts.extra) pop.appendChild(opts.extra);
     document.body.appendChild(pop);
-    const r = f.getBoundingClientRect();
+    const r = anchor.getBoundingClientRect();
     pop.style.left = Math.min(innerWidth - 236, r.left) + 'px';
     pop.style.top = Math.min(innerHeight - pop.offsetHeight - 8, r.bottom + 4) + 'px';
     pop.addEventListener('pointerdown', (e2) => { if (e2.target.tagName !== 'INPUT') e2.preventDefault(); });
@@ -380,8 +538,7 @@ function colorField(v, ids, key, opts = {}) {
     ci.addEventListener('input', () => { hx.value = ci.value; apply(ci.value, 'color' + key); });
     ci.addEventListener('change', () => pushRecent(ci.value));
     hx.addEventListener('keydown', (e2) => { e2.stopPropagation(); if (e2.key === 'Enter' && /^#[0-9a-f]{3,8}$/i.test(hx.value.trim())) { pushRecent(hx.value.trim()); apply(hx.value.trim(), null); closeColorPop(); } });
-  };
-  return f;
+  }
 }
 
 function row(label, ...kids) {

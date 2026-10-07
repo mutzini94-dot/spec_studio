@@ -7,6 +7,7 @@ import * as store from './store.js';
 import * as P from './panels.js';
 import * as V from './viewtools.js';
 import * as CM from './contextmenu.js';
+import * as RB from './ribbon.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const SNAP = 5;
@@ -126,7 +127,7 @@ export function flush() {
 let uiT = 0;
 export function ui() {
   clearTimeout(uiT);
-  uiT = setTimeout(() => { P.renderTop(E); P.renderLeft(E); P.renderRight(E); V.renderNotes(E); V.drawRulers(E); }, E.drag ? 120 : 0);
+  uiT = setTimeout(() => { P.renderTop(E); P.renderLeft(E); P.renderRight(E); V.renderNotes(E); V.drawRulers(E); RB.update(); }, E.drag ? 120 : 0);
 }
 
 // ---------- 캔버스 ----------
@@ -1989,6 +1990,7 @@ export function boot() {
   window.addEventListener('beforeunload', () => { finishEdit(); });
   P.init(E);
   V.init(E);
+  RB.init();
   // 마지막으로 작업한 문서를 바로 연다 (없으면 시작 화면)
   let last = null;
   try { last = localStorage.getItem('tnspec:last'); } catch (e) { /* 저장소 차단 */ }

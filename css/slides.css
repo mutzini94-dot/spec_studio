@@ -1,0 +1,28 @@
+/* 왼쪽 슬라이드 창 (PowerPoint 썸네일 보기) */
+.vsw { display: inline-flex; gap: 2px; background: var(--bg); border-radius: 6px; padding: 2px; text-transform: none; letter-spacing: 0; }
+.sec-h .vsw button { border: 0; background: transparent; color: var(--tx2); border-radius: 4px; padding: 2px 8px; font-size: 11px; font-weight: 600; }
+.sec-h .vsw button.on { background: var(--acc2); color: #fff; }
+.sec-h .vsw button:hover:not(.on) { background: var(--panel2); color: var(--tx); }
+
+#layers.slides { outline: none; padding-bottom: 60px; }
+.sl-page { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 10px 10px 4px; padding: 3px 4px; color: var(--tx2); font-size: 11px; font-weight: 600; cursor: pointer; border-bottom: 1px solid var(--line); }
+.sl-page small { color: var(--tx3); font-weight: 400; }
+.sl-page.cur span { color: var(--tx); }
+.sl-page.drop-page { box-shadow: inset 0 0 0 1px var(--acc); border-radius: 4px; }
+.sl-item { position: relative; display: flex; gap: 6px; padding: 6px 8px 6px 4px; cursor: pointer; border-radius: 6px; margin: 0 4px; }
+.sl-item:hover { background: rgba(255, 255, 255, .04); }
+.sl-num { width: 22px; flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; padding-top: 2px; color: var(--tx3); font-size: 11px; }
+.sl-num i { font-style: normal; font-size: 10px; }
+.sl-body { min-width: 0; }
+.sl-thumb { position: relative; overflow: hidden; background: #fff; border-radius: 3px; box-shadow: 0 0 0 1px rgba(255, 255, 255, .08), 0 1px 3px rgba(0, 0, 0, .4); pointer-events: none; }
+.sl-thumb .frame { position: absolute; left: 0; top: 0; box-shadow: none; }
+.sl-name { margin-top: 4px; font-size: 11px; color: var(--tx2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 184px; }
+.sl-item.on .sl-thumb { box-shadow: 0 0 0 2px var(--acc), 0 1px 3px rgba(0, 0, 0, .4); }
+.sl-item.on .sl-num b, .sl-item.on .sl-name { color: #fff; }
+.sl-item.fsel { background: rgba(76, 141, 255, .14); }
+.sl-item.off .sl-thumb { opacity: .4; }
+.sl-item.dragging { opacity: .4; }
+.sl-item.drop-t::before, .sl-item.drop-b::after { content: ""; position: absolute; left: 28px; right: 8px; height: 3px; background: var(--acc); border-radius: 2px; }
+.sl-item.drop-t::before { top: -2px; }
+.sl-item.drop-b::after { bottom: -2px; }
+#layers.slides:focus .sl-item.on .sl-thumb { box-shadow: 0 0 0 2px var(--acc), 0 0 0 5px rgba(76, 141, 255, .3); }
