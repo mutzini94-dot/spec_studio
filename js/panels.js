@@ -3,7 +3,7 @@ import * as M from './model.js';
 import * as O from './ops.js';
 import * as Ed from './editor.js';
 import * as V from './viewtools.js';
-import { renderFrame, renderNode, FONT_NAMES, collectDescriptions, SHAPES, SHAPE_NAME, shapePath, CAPS, resolveColor, fitText } from './render.js';
+import { renderFrame, renderNode, FONT_NAMES, collectDescriptions, SHAPES, SHAPE_NAME, shapePath, CAPS, resolveColor, fitText, embedInfo } from './render.js';
 import { DOC_TEMPLATES, LAYOUT_INFO } from './templates.js';
 import * as store from './store.js';
 import * as CM from './contextmenu.js';
@@ -175,7 +175,7 @@ function thumbFor(f, pno, fresh) {
   const holder = document.createElement('div');
   holder.className = 'sl-thumb';
   holder.style.cssText = `width:${THUMB_W}px;height:${Math.round(E.doc.size.h * sc)}px`;
-  const fr = renderFrame(f, { doc: E.doc, idx: E.idx, mode: 'present', pageNo: pno });
+  const fr = renderFrame(f, { doc: E.doc, idx: E.idx, mode: 'present', pageNo: pno, noEmbed: true });
   fr.style.transform = `scale(${sc})`;
   fr.style.transformOrigin = '0 0';
   holder.appendChild(fr);
@@ -415,7 +415,7 @@ function renderComponents(L) {
     const holder = document.createElement('div');
     holder.className = 'frame';
     holder.style.cssText = `width:${c.w}px;height:${c.h}px;transform:translate(-50%,-50%) scale(${sc});transform-origin:center;overflow:visible`;
-    holder.appendChild(renderNode(M.createNode('instance', { id: 'pv', x: 0, y: 0, w: c.w, h: c.h, component: c.id }), { doc: E.doc, idx: E.idx, mode: 'present' }));
+    holder.appendChild(renderNode(M.createNode('instance', { id: 'pv', x: 0, y: 0, w: c.w, h: c.h, component: c.id }), { doc: E.doc, idx: E.idx, mode: 'present', noEmbed: true }));
     pv.appendChild(holder);
     pv.ondragstart = (ev) => { ev.dataTransfer.setData('text/x-tn-comp', c.id); ev.dataTransfer.effectAllowed = 'copy'; };
     pv.ondblclick = () => Ed.editComponent(c.id);
@@ -1045,9 +1045,10 @@ function descInspector(box, n) {
 function hotspotInspector(box, n) {
   const s = section('인터랙션 영역', '미리보기(▶)에서 동작');
   const a = n.action || { type: 'none' };
-  const t = selectField(a.type, [['none', '동작 없음'], ['goto', '다른 프레임으로 이동'], ['url', '링크 열기'], ['note', '메모 띄우기']], [n.id], 'action.type', { label: '인터랙션 동작' });
+  const t = selectField(a.type, [['none', '동작 없음'], ['goto', '다른 프레임으로 이동'], ['url', '링크 열기'], ['note', '메모 띄우기'], ['html', 'HTML 프로토타입 (영역 안에서 동작)']], [n.id], 'action.type', { label: '인터랙션 동작' });
   t.querySelector('select').id = 'insp-hot-type';
   s.appendChild(row('동작', t));
+  if (a.type === 'html') { htmlEmbedInspector(s, n, a); box.appendChild(s); return; }
   if (a.type === 'goto') {
     const frames = E.idx.frames();
     s.appendChild(row('대상', selectField(a.target || '', [['', '— 프레임 선택 —']].concat(frames.map((f, i) => [f.id, (i + 1) + 'P · ' + f.name])), [n.id], 'action.target', { label: '이동 대상' })));
@@ -1061,6 +1062,63 @@ function hotspotInspector(box, n) {
     s.appendChild(ta);
   }
   box.appendChild(s);
+}
+
+// HTML 프로토타입: 내용(파일 · 저장소 · 주소 · 코드) · 원래 크기 · 맞춤 · 체험
+function htmlEmbedInspector(s, n, a) {
+  const info = embedInfo(n, E.doc);
+  const src = a.asset ? 'asset' : a.src ? 'src' : a.html ? 'html' : '';
+  s.appendChild(el(`<div class="muted" style="margin:2px 0 8px">${info ? `내용: <b>${esc(info.label)}</b>${a.asset && E.doc.assets[a.asset] ? ` · ${Math.round((E.doc.assets[a.asset].size || 0) / 1024)}KB (문서에 저장됨)` : a.src ? ' · 주소로 연결' : ''}` : '아직 내용이 없어요. 아래에서 HTML을 넣으세요.'}</div>`));
+  const setContent = (patch, label) => {
+    const next = Object.assign({}, a, { asset: undefined, src: undefined, html: undefined }, patch);
+    Object.keys(next).forEach((k) => next[k] === undefined && delete next[k]);
+    Ed.commit([{ op: 'set', id: n.id, key: 'action', value: next }], label);
+  };
+  const b = el('<div class="btns"></div>');
+  b.appendChild(btn('📄 HTML 파일 올리기', '문서 안에 복사본으로 저장돼요 (다른 PC에서도 동작)', () => {
+    const i = document.createElement('input'); i.type = 'file'; i.accept = '.html,.htm,text/html';
+    i.onchange = async () => { const f = i.files[0]; if (!f) return; const text = await f.text(); const r = Ed.htmlAssetOps(text, f.name); r.ops.push({ op: 'set', id: n.id, key: 'action', value: Object.assign({}, a, { asset: r.aid, src: undefined, html: undefined }) }); r.ops.push({ op: 'set', id: n.id, key: 'name', value: f.name.replace(/\.html?$/i, '') }); Ed.commit(r.ops, 'HTML 프로토타입 내용'); };
+    i.click();
+  }, 'primary wide'));
+  b.appendChild(btn('📁 저장소에서 고르기', 'Spec Studio 서버가 열고 있는 폴더의 HTML (예: chat-ui-prototype.html)', async (ev) => {
+    let names = [];
+    try {
+      const html = await (await fetch('/', { cache: 'no-store' })).text();
+      names = [...new Set([...html.matchAll(/href="([^"]+\.html?)"/gi)].map((m) => decodeURIComponent(m[1])))].filter((x) => !x.includes('/')).sort();
+    } catch (e) { /* 정적 호스팅 */ }
+    if (!names.length) { Ed.toast('서버 폴더 목록을 읽을 수 없어요. "HTML 파일 올리기"를 쓰세요.', true); return; }
+    const r = ev.target.closest('button').getBoundingClientRect();
+    CM.openItems(r.left, r.bottom + 2, [{ title: '문서에 복사본으로 넣기' }, ...names.map((nm) => ({ label: nm, act: async () => {
+      const text = await (await fetch('/' + encodeURIComponent(nm), { cache: 'no-store' })).text();
+      const rr = Ed.htmlAssetOps(text, nm);
+      rr.ops.push({ op: 'set', id: n.id, key: 'action', value: Object.assign({}, a, { asset: rr.aid, src: undefined, html: undefined }) }, { op: 'set', id: n.id, key: 'name', value: nm.replace(/\.html?$/i, '') });
+      Ed.commit(rr.ops, 'HTML 프로토타입 내용');
+    } }))]);
+  }, 'wide'));
+  s.appendChild(b);
+  s.appendChild(row('주소', textField(a.src || '', [n.id], 'action.src', { ph: 'https://… 또는 /chat-ui-prototype.html', label: 'HTML 주소', makeOps: (v) => [{ op: 'set', id: n.id, key: 'action', value: Object.assign({}, a, { src: v || undefined, asset: v ? undefined : a.asset, html: v ? undefined : a.html }) }] })));
+  const code = el(`<details style="margin:4px 0 6px"${src === 'html' ? ' open' : ''}><summary class="muted" style="cursor:pointer">HTML 코드 직접 붙여넣기</summary><textarea id="insp-html-code" placeholder="<!doctype html> …" style="min-height:90px;font:11px Consolas,monospace">${esc(a.html || '')}</textarea></details>`);
+  const ta = code.querySelector('textarea');
+  ta.addEventListener('change', () => setContent({ html: ta.value || undefined }, 'HTML 코드'));
+  ta.addEventListener('keydown', (ev) => ev.stopPropagation());
+  ta.addEventListener('blur', () => setTimeout(renderRight, 0));
+  s.appendChild(code);
+  const g = el('<div class="grid2"></div>');
+  g.appendChild(numField('원래W', a.cw || n.w, [n.id], 'action.cw', { label: '프로토타입 원래 크기' }));
+  g.appendChild(numField('원래H', a.ch || n.h, [n.id], 'action.ch', { label: '프로토타입 원래 크기' }));
+  s.appendChild(g);
+  const pre = el('<div class="btns"></div>');
+  [['데스크톱 1080×720', 1080, 720], ['노트북 1280×800', 1280, 800], ['모바일 360×640', 360, 640], ['영역 크기 그대로', n.w, n.h]].forEach(([l, w, h]) => pre.appendChild(btn(l, '프로토타입이 그려지는 원래 크기', () => Ed.commit([{ op: 'set', id: n.id, key: 'action.cw', value: Math.round(w) }, { op: 'set', id: n.id, key: 'action.ch', value: Math.round(h) }], '프로토타입 크기'))));
+  s.appendChild(pre);
+  s.appendChild(row('맞춤', selectField(a.fit || 'contain', [['contain', '비율 유지 (축소해서 맞춤)'], ['stretch', '영역에 꽉 채우기']], [n.id], 'action.fit', { label: '프로토타입 맞춤' })));
+  const so = el(`<label class="chk" style="margin:4px 0 8px"><input type="checkbox" ${a.sameOrigin ? 'checked' : ''}> 같은 출처 허용 (localStorage가 필요한 페이지만 · 믿을 수 있는 HTML일 때)</label>`);
+  so.querySelector('input').onchange = (ev) => Ed.commit([{ op: 'set', id: n.id, key: 'action.sameOrigin', value: ev.target.checked || undefined }], '보안 설정');
+  s.appendChild(so);
+  const go = el('<div class="btns"></div>');
+  go.appendChild(btn(E.liveEmbed === n.id ? '■ 체험 끝내기 (Esc)' : '▶ 여기서 체험 (더블클릭)', '편집 화면에서 바로 눌러 보기', () => (E.liveEmbed === n.id ? Ed.stopLiveEmbed() : Ed.startLiveEmbed(n.id)), 'primary wide'));
+  go.appendChild(btn('미리보기에서 보기', 'Shift+F5', () => present(Ed.frameOfNode(n.id)), 'wide'));
+  s.appendChild(go);
+  s.appendChild(el('<div class="muted" style="margin-top:6px">프로토타입은 편집기와 분리된 안전한 틀(sandbox)에서 실행돼요. 썸네일 · 인쇄에는 카드로만 나와요.</div>'));
 }
 
 function instanceInspector(box, n) {
@@ -1200,7 +1258,7 @@ export async function home(e, first) {
     const card = document.createElement('button');
     card.className = 'tpl';
     card.innerHTML = `<div class="th"></div><div class="tt"><b>${esc(t.name)}</b><small>${esc(t.desc)}</small></div>`;
-    const fr = renderFrame(f, { doc, idx, mode: 'present', pageNo: 1 });
+    const fr = renderFrame(f, { doc, idx, mode: 'present', pageNo: 1, noEmbed: true });
     fr.style.transform = 'scale(' + (190 / 960) + ')';
     card.querySelector('.th').appendChild(fr);
     card.onclick = () => { closeModal(); Ed.openDoc(t.build()); };
@@ -1426,7 +1484,7 @@ export function printDoc() {
     if (f.hidden) return;
     const pg = document.createElement('div');
     pg.className = 'print-page';
-    pg.appendChild(renderFrame(f, { doc: E.doc, idx: E.idx, mode: 'present', pageNo: i + 1 }));
+    pg.appendChild(renderFrame(f, { doc: E.doc, idx: E.idx, mode: 'present', pageNo: i + 1, noEmbed: true }));
     host.appendChild(pg);
   });
   document.body.appendChild(host);

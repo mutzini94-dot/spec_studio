@@ -189,7 +189,7 @@ export function renderCanvas() {
 function fillWrap(wrap, f, pno) {
   const notes = f.notes && f.notes.trim() ? '<span title="프레임 메모 있음">📝</span>' : '';
   wrap.innerHTML = `<div class="flabel" data-flabel="${f.id}"><b>${esc(f.name)}</b><span>${esc(LAYOUT_INFO[f.layout] ? LAYOUT_INFO[f.layout].name : f.layout)} · ${pno} P</span>${f.hidden ? '<span class="tag-hidden">숨김</span>' : ''}${notes}</div>`;
-  wrap.appendChild(renderFrame(f, { doc: E.doc, idx: E.idx, mode: 'edit', pageNo: pno }));
+  wrap.appendChild(renderFrame(f, { doc: E.doc, idx: E.idx, mode: 'edit', pageNo: pno, liveId: E.liveEmbed }));
   wrap.appendChild(Object.assign(document.createElement('div'), { className: 'overlay' }));
   wrap.classList.toggle('active', f.id === E.activeFrame);
   wrap.classList.toggle('fsel', f.id === E.frameSel);
@@ -305,6 +305,7 @@ export function frameOfNode(id) { const c = E.idx.containerOf(id); return c ? c.
 
 export function select(ids, opts = {}) {
   finishEdit();
+  if (E.liveEmbed && !ids.includes(E.liveEmbed)) stopLiveEmbed();
   E.sel = ids.filter((id) => E.idx.get(id));
   E.frameSel = opts.frame || null;
   if (E.crop && !E.sel.includes(E.crop)) E.crop = null;
@@ -621,6 +622,8 @@ function onDown(e) {
   if (hd && hd.dataset.pt) { startEndpoint(e, fid, hd.dataset.pt); return; }
   const th = e.target.closest('.tb-col-h, .tb-row-h');
   if (th) { startTableResize(e, th.dataset.col != null ? 'col' : 'row', +(th.dataset.col != null ? th.dataset.col : th.dataset.row)); return; }
+  // 체험 중인 HTML 프로토타입 밖을 누르면 체험 끝
+  if (E.liveEmbed && !e.target.closest(`[data-id="${E.liveEmbed}"]`)) stopLiveEmbed();
   if (E.crop) {
     const hitc = e.target.closest('[data-id]');
     if (hitc && hitc.dataset.id === E.crop) { startCropPan(e, fid); return; }
@@ -1458,6 +1461,7 @@ function onDbl(e) {
     return;
   }
   if (n.type === 'description') { const t = $('#insp-desc-title'); if (t) t.focus(); }
+  if (n.type === 'hotspot' && n.action && n.action.type === 'html') { startLiveEmbed(n.id); return; }
   if (n.type === 'hotspot') { const t = $('#insp-hot-type'); if (t) t.focus(); }
 }
 
@@ -1673,6 +1677,7 @@ export function addPage() {
 }
 export function gotoPage(pid) {
   finishEdit();
+  E.liveEmbed = null;
   if (E.compId) E.compId = null;
   E.pageId = pid; E.sel = []; E.scope = null; E.frameSel = null; E.crop = null;
   const p = currentPage();
@@ -1711,6 +1716,54 @@ export async function addImageFiles(files, fid, at) {
     } catch (err) { toast(err.message, true); }
   }
 }
+// ---------- HTML 프로토타입 ----------
+// 편집 화면에서 바로 체험: 그 영역만 실제 페이지로 바꿔 그린다 (Esc · 바깥 클릭으로 끝)
+export function startLiveEmbed(id) {
+  const fid = frameOfNode(id);
+  E.liveEmbed = id;
+  select([id]);
+  scheduleRenderAll(fid);
+  toast('체험 중: 프로토타입을 직접 눌러 보세요. Esc 또는 바깥을 누르면 끝나요.');
+}
+export function stopLiveEmbed() {
+  const id = E.liveEmbed;
+  if (!id) return;
+  E.liveEmbed = null;
+  const fid = E.idx.get(id) && frameOfNode(id);
+  if (fid) scheduleRenderAll(fid);
+}
+const textToDataURL = (text) => 'data:text/html;base64,' + btoa(Array.from(new TextEncoder().encode(text), (b) => String.fromCharCode(b)).join(''));
+// HTML 글을 문서 자원으로 넣고 그 자원을 쓰는 연산
+export function htmlAssetOps(text, name) {
+  const aid = M.uid('htm');
+  return { aid, ops: [{ op: 'set', id: 'doc', key: 'assets.' + aid, value: { mime: 'text/html', data: textToDataURL(text), name: name || 'prototype.html', size: text.length } }] };
+}
+// 프로토타입이 원래 그려지는 크기(넓게 만든 페이지는 1080×720)를 본문 영역에 맞춰 넣는다
+export function addHtmlEmbed(fid, action, at, name) {
+  fid = fid || E.compId || E.activeFrame;
+  if (!fid) { toast('넣을 프레임을 먼저 고르세요.'); return null; }
+  const cb = contentBox(fid) || { x: 20, y: 20, w: 600, h: 400 };
+  const cw = action.cw || 1080, ch = action.ch || 720;
+  const k = Math.min(1, (cb.w - 20) / cw, (cb.h - 20) / ch);
+  const w = O.R(cw * k), h = O.R(ch * k);
+  const p = at || { x: cb.x + (cb.w - w) / 2, y: cb.y + (cb.h - h) / 2 };
+  const n = M.createNode('hotspot', { name: name || 'HTML 프로토타입', x: O.R(p.x), y: O.R(p.y), w, h, action: Object.assign({ type: 'html', cw, ch, fit: 'contain' }, action) });
+  return addNode(fid, n, { label: 'HTML 프로토타입 넣기' });
+}
+export async function addHtmlFile(file, fid, at) {
+  const text = await file.text();
+  const { aid, ops } = htmlAssetOps(text, file.name);
+  if (!commit(ops, 'HTML 자원')) return;
+  const id = addHtmlEmbed(fid, { asset: aid }, at, file.name.replace(/\.html?$/i, ''));
+  if (id) toast('HTML 프로토타입을 넣었어요. 더블클릭하면 여기서 체험, ▶ 미리보기에서도 동작해요.');
+}
+export function pickHtml(fid) {
+  const i = document.createElement('input');
+  i.type = 'file'; i.accept = '.html,.htm,text/html';
+  i.onchange = () => { if (i.files[0]) addHtmlFile(i.files[0], fid); };
+  i.click();
+}
+
 export function pickImage() {
   const i = document.createElement('input');
   i.type = 'file'; i.accept = 'image/*'; i.multiple = true;
@@ -1829,7 +1882,8 @@ function onKey(e) {
   if (e.key === 'Tab') { e.preventDefault(); cycleSelection(e.shiftKey); return; }
   if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSelection(); return; }
   if (e.key === 'Escape') {
-    if (E.crop) exitCrop();
+    if (E.liveEmbed) stopLiveEmbed();
+    else if (E.crop) exitCrop();
     else if (E.painter) { E.painter = false; canvas().classList.remove('painting'); }
     else if (E.tool !== 'select') setTool('select');
     else if (E.scope) { const g = E.scope; E.scope = null; select([g]); }
@@ -1978,6 +2032,8 @@ export function boot() {
     const p = toFrame(e, fid);
     const cid = e.dataTransfer.getData('text/x-tn-comp');
     if (cid) { const comp = E.doc.components.find((k) => k.id === cid); if (comp) insertInstance(cid, fid, { x: p.x - comp.w / 2, y: p.y - comp.h / 2 }); return; }
+    const htmlFile = [...e.dataTransfer.files].find((f) => /\.html?$/i.test(f.name));
+    if (htmlFile) { addHtmlFile(htmlFile, fid, p); return; }
     addImageFiles([...e.dataTransfer.files], fid, p);
   });
   window.addEventListener('keydown', onKey);

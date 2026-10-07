@@ -203,7 +203,9 @@ export function renderNode(n, ctx) {
     }
     case 'hotspot': {
       const a = n.action || {};
-      let label = '인터랙션';
+      if (a.type === 'html') { renderEmbed(el, n, ctx); break; }
+      let label = a.type ? '인터랙션 · 동작을 정하세요' : '인터랙션';
+      if (a.type === 'none' || !a.type) label = '인터랙션 · 동작을 정하세요';
       if (a.type === 'goto') { const f = ctx.idx && ctx.idx.get(a.target); label = '→ ' + (f ? f.name : '프레임 선택 필요'); }
       else if (a.type === 'url') label = '↗ ' + (a.url || '링크');
       else if (a.type === 'note') label = '💬 ' + (a.note || '메모').slice(0, 20);
@@ -226,6 +228,57 @@ export function renderNode(n, ctx) {
     }
   }
   return el;
+}
+
+// ---------- HTML 프로토타입 (인터랙션 영역 안에서 실제로 동작하는 페이지) ----------
+const htmlCache = new Map();
+// 자원에 저장된 HTML(dataURL) → 글자
+export function assetHTML(doc, id) {
+  const a = doc.assets[id];
+  if (!a) return null;
+  if (htmlCache.has(a.data)) return htmlCache.get(a.data);
+  let text = '';
+  try {
+    const b64 = a.data.split(',', 2)[1] || '';
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    text = new TextDecoder('utf-8').decode(bytes);
+  } catch (e) { text = '<p>HTML을 읽을 수 없습니다</p>'; }
+  htmlCache.set(a.data, text);
+  return text;
+}
+export function embedInfo(n, doc) {
+  const a = n.action || {};
+  if (a.asset && doc.assets[a.asset]) return { srcdoc: assetHTML(doc, a.asset), label: doc.assets[a.asset].name || 'HTML 파일' };
+  if (a.src) return { src: a.src, label: a.src };
+  if (a.html) return { srcdoc: a.html, label: '붙여 넣은 HTML' };
+  return null;
+}
+function renderEmbed(el, n, ctx) {
+  const a = n.action || {};
+  el.classList.add('embed');
+  const info = embedInfo(n, ctx.doc);
+  // 실제로 돌리는 곳: 미리보기, 편집 화면에서 "체험" 중인 영역. 썸네일 · 인쇄 · 평소 편집에서는 카드만
+  const live = info && !ctx.noEmbed && (ctx.mode === 'present' || ctx.liveId === n.id);
+  if (!live) {
+    el.innerHTML = `<div class="emb-card"><b>⚡ HTML 프로토타입</b><span>${esc(info ? info.label : '내용이 비어 있어요 — 속성 패널에서 HTML을 넣으세요')}</span>${info && ctx.mode === 'edit' ? '<small>더블클릭하면 여기서 바로 체험 · ▶ 미리보기에서도 동작</small>' : ''}</div>`;
+    return;
+  }
+  const cw = a.cw || n.w, ch = a.ch || n.h;
+  const sx = n.w / cw, sy = n.h / ch;
+  const fit = a.fit || 'contain';
+  const kx = fit === 'stretch' ? sx : Math.min(sx, sy), ky = fit === 'stretch' ? sy : Math.min(sx, sy);
+  const box = h('div', 'emb-box');
+  const fr = document.createElement('iframe');
+  // 편집기와 격리: 스크립트 · 폼 · 팝업은 허용, 같은 출처 접근(편집기 데이터)은 막음
+  fr.setAttribute('sandbox', 'allow-scripts allow-forms allow-popups allow-modals allow-pointer-lock' + (a.sameOrigin ? ' allow-same-origin' : ''));
+  fr.title = n.name || 'HTML 프로토타입';
+  fr.style.cssText = `width:${cw}px;height:${ch}px;transform:scale(${kx},${ky});transform-origin:0 0`;
+  if (info.src) fr.src = info.src; else fr.srcdoc = info.srcdoc;
+  box.appendChild(fr);
+  el.appendChild(box);
+  if (ctx.liveId === n.id && ctx.mode === 'edit') el.classList.add('emb-live');
 }
 
 // ---------- 이미지: 자르기 · 모양 · 테두리 ----------

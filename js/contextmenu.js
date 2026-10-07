@@ -295,8 +295,17 @@ function forDescription(n) {
 function forHotspot(n) {
   const frames = E.idx.frames();
   const a = n.action || {};
+  if (a.type === 'html') return [
+    { label: E.liveEmbed === n.id ? '■ 체험 끝내기' : '▶ 여기서 체험', kbd: '더블클릭', act: () => (E.liveEmbed === n.id ? Ed.stopLiveEmbed() : Ed.startLiveEmbed(n.id)), bold: true },
+    { label: 'HTML 바꾸기 (파일)…', act: () => { const i = document.createElement('input'); i.type = 'file'; i.accept = '.html,.htm,text/html'; i.onchange = async () => { const f = i.files[0]; if (!f) return; const r = Ed.htmlAssetOps(await f.text(), f.name); r.ops.push({ op: 'set', id: n.id, key: 'action', value: Object.assign({}, a, { asset: r.aid, src: undefined, html: undefined }) }); Ed.commit(r.ops, 'HTML 프로토타입 내용'); }; i.click(); } },
+    { label: '원래 크기', sub: [['데스크톱 1080×720', 1080, 720], ['노트북 1280×800', 1280, 800], ['모바일 360×640', 360, 640]].map(([l, w, h]) => ({ label: l, check: a.cw === w && a.ch === h, act: () => Ed.commit([{ op: 'set', id: n.id, key: 'action.cw', value: w }, { op: 'set', id: n.id, key: 'action.ch', value: h }], '프로토타입 크기') })) },
+    { label: '영역을 원래 비율로', act: () => { const cw = a.cw || n.w, ch = a.ch || n.h; Ed.commit([{ op: 'set', id: n.id, key: 'h', value: O.R(n.w * ch / cw) }], '원래 비율'); } },
+    { label: '미리보기에서 확인', kbd: 'Shift+F5', act: () => P.present(E.activeFrame) },
+    { label: '일반 인터랙션 영역으로', act: () => Ed.commit([{ op: 'set', id: n.id, key: 'action', value: { type: 'none' } }], '인터랙션 동작') },
+  ];
   return [
     { label: '동작 설정', act: () => focusInspector('#insp-hot-type'), bold: true },
+    { label: '이 영역에 HTML 프로토타입 넣기…', act: () => { const i = document.createElement('input'); i.type = 'file'; i.accept = '.html,.htm,text/html'; i.onchange = async () => { const f = i.files[0]; if (!f) return; const r = Ed.htmlAssetOps(await f.text(), f.name); r.ops.push({ op: 'set', id: n.id, key: 'action', value: { type: 'html', asset: r.aid, cw: 1080, ch: 720, fit: 'contain' } }, { op: 'set', id: n.id, key: 'name', value: f.name.replace(/\.html?$/i, '') }); Ed.commit(r.ops, 'HTML 프로토타입 넣기'); }; i.click(); } },
     { label: '이동할 프레임', sub: frames.slice(0, 40).map((f, i) => ({ label: (i + 1) + 'P · ' + f.name, check: a.type === 'goto' && a.target === f.id, act: () => Ed.commit([{ op: 'set', id: n.id, key: 'action', value: { type: 'goto', target: f.id } }], '인터랙션 동작') })) },
     { label: '미리보기에서 확인', kbd: 'Shift+F5', act: () => P.present(E.activeFrame) },
   ];
@@ -358,6 +367,7 @@ function forEmpty(ctx) {
       { label: 'Description 번호', act: () => Ed.addNode(fid, M.createNode('description', { x: ctx.point.x - 8, y: ctx.point.y - 8, num: O.nextDescriptionNumber(Ed.containerFor(fid)) })) },
       { label: '표 (3×4)', act: () => Ed.addNode(fid, M.createNode('table', Object.assign({ x: ctx.point.x, y: ctx.point.y, w: 400, h: 96 }, M.makeTable([90, 130, 180], [24, 24, 24, 24], { header: ['항목', '정책', '상세'], headerBg: '#d9d9d9' })))) },
       { label: '인터랙션 영역', act: () => Ed.addNode(fid, M.createNode('hotspot', { x: ctx.point.x, y: ctx.point.y })) },
+      { label: 'HTML 프로토타입…', act: () => Ed.pickHtml(fid) },
       { label: '이미지…', act: () => Ed.pickImage() },
       ...(E.doc.components.length ? [SEP, ...E.doc.components.filter((c) => c.id !== comp).map((c) => ({ label: '◇ ' + c.name, act: () => Ed.insertInstance(c.id, fid, ctx.point) }))] : []),
     ] },

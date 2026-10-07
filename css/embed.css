@@ -1,0 +1,15 @@
+/* 인터랙션 영역 안 HTML 프로토타입 */
+.n-hotspot.embed { border: 1px solid #9ec2ff; background: #f4f8ff; border-radius: 4px; overflow: hidden; }
+.n-hotspot.embed em { display: none; }
+.emb-card { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 8px; text-align: center; color: #1d5fd1;
+  background: repeating-linear-gradient(135deg, #f4f8ff 0 10px, #eaf1ff 10px 20px); font-family: var(--ui); }
+.emb-card b { font-size: 12px; }
+.emb-card span { font-size: 10px; color: #3b4a66; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.emb-card small { font-size: 9px; color: #6b7a99; }
+.emb-box { position: absolute; inset: 0; overflow: hidden; background: #fff; }
+.emb-box iframe { position: absolute; left: 0; top: 0; border: 0; background: #fff; display: block; }
+.edit-mode .n-hotspot.embed.emb-live { outline: 2px solid #ff8a00; outline-offset: 1px; z-index: 3; }
+.edit-mode .n-hotspot.embed.emb-live::after { content: "체험 중 · Esc로 끝내기"; position: absolute; right: 4px; top: 4px; background: #ff8a00; color: #fff; font: 600 9px/1.6 var(--ui); padding: 0 6px; border-radius: 3px; pointer-events: none; }
+/* 미리보기: 프로토타입은 그대로 보이고 눌러서 쓸 수 있게 */
+#present .n-hotspot.embed { border: 0; background: #fff; cursor: auto; }
+#present .n-hotspot.embed:hover { outline: none; background: #fff; }

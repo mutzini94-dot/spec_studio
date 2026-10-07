@@ -248,6 +248,7 @@ export function collectRefs(nodes, doc, assets = {}, comps = new Map()) {
   const runsAssets = (runs) => (runs || []).forEach((r) => { if (r.img && doc.assets[r.img]) assets[r.img] = doc.assets[r.img]; });
   const visit = (n) => {
     if (n.type === 'image' && n.asset && doc.assets[n.asset]) assets[n.asset] = doc.assets[n.asset];
+    if (n.type === 'hotspot' && n.action && n.action.asset && doc.assets[n.action.asset]) assets[n.action.asset] = doc.assets[n.action.asset];
     runsAssets(n.runs);
     if (n.type === 'table') n.rows.forEach((r) => r.cells.forEach((c) => c && runsAssets(c.runs)));
     if (n.overrides) Object.values(n.overrides).forEach((o) => { runsAssets(o.runs); if (o.asset && doc.assets[o.asset]) assets[o.asset] = doc.assets[o.asset]; });

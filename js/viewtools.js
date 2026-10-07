@@ -189,7 +189,7 @@ export function renderSorter(E, w) {
       it.innerHTML = `<div class="sort-thumb" style="width:${TW}px;height:${TH}px"></div>
         <div class="sort-cap"><em>${nums.get(f.id)}</em><span title="${esc(f.name)}">${esc(f.name)}</span>${f.hidden ? '<i title="숨긴 프레임">🙈</i>' : ''}${f.notes ? '<i title="메모 있음">📝</i>' : ''}</div>
         <div class="sort-acts"><button data-act="hide" title="${f.hidden ? '보이기' : '숨기기 (미리보기 · 인쇄에서 빠짐)'}">${f.hidden ? '👁' : '🙈'}</button><button data-act="dup" title="복제">⧉</button><button data-act="del" title="삭제">🗑</button></div>`;
-      const fr = renderFrame(f, { doc: E.doc, idx: E.idx, mode: 'present', pageNo: nums.get(f.id) });
+      const fr = renderFrame(f, { doc: E.doc, idx: E.idx, mode: 'present', pageNo: nums.get(f.id), noEmbed: true });
       fr.style.transform = `scale(${sc})`;
       fr.style.transformOrigin = '0 0';
       it.querySelector('.sort-thumb').appendChild(fr);
