@@ -8,6 +8,7 @@ import * as P from './panels.js';
 import * as V from './viewtools.js';
 import * as CM from './contextmenu.js';
 import * as RB from './ribbon.js';
+import * as AP from './autoproto.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const SNAP = 5;
@@ -36,6 +37,7 @@ export const E = {
   altDown: false,
   collapsed: new Set(),
   leftTab: 'layers',
+  embBusy: new Set(),  // 스크린샷으로 자동 구현 중인 인터랙션 영역
 };
 window.__E = E;   // 디버깅용
 
@@ -189,7 +191,7 @@ export function renderCanvas() {
 function fillWrap(wrap, f, pno) {
   const notes = f.notes && f.notes.trim() ? '<span title="프레임 메모 있음">📝</span>' : '';
   wrap.innerHTML = `<div class="flabel" data-flabel="${f.id}"><b>${esc(f.name)}</b><span>${esc(LAYOUT_INFO[f.layout] ? LAYOUT_INFO[f.layout].name : f.layout)} · ${pno} P</span>${f.hidden ? '<span class="tag-hidden">숨김</span>' : ''}${notes}</div>`;
-  wrap.appendChild(renderFrame(f, { doc: E.doc, idx: E.idx, mode: 'edit', pageNo: pno, liveId: E.liveEmbed }));
+  wrap.appendChild(renderFrame(f, { doc: E.doc, idx: E.idx, mode: 'edit', pageNo: pno, liveId: E.liveEmbed, busy: E.embBusy }));
   wrap.appendChild(Object.assign(document.createElement('div'), { className: 'overlay' }));
   wrap.classList.toggle('active', f.id === E.activeFrame);
   wrap.classList.toggle('fsel', f.id === E.frameSel);
@@ -1099,7 +1101,8 @@ function startCreate(e, fid, p0) {
       n = M.createNode('text', { x: O.R(b.x), y: O.R(b.y), w: tiny ? 160 : O.R(b.w), h: tiny ? 18 : O.R(Math.max(16, b.h)), runs: [{ t: '' }], name: '텍스트' });
       if (tiny) n.style.fit = 'grow';
     } else if (tool === 'hotspot') {
-      n = M.createNode('hotspot', { x: O.R(b.x), y: O.R(b.y), w: tiny ? 120 : O.R(b.w), h: tiny ? 40 : O.R(b.h) });
+      // 인터랙션 영역 = 화면 스크린샷을 올려 자동 구현하는 자리
+      n = M.createNode('hotspot', { x: O.R(b.x), y: O.R(b.y), w: tiny ? 480 : O.R(b.w), h: tiny ? 300 : O.R(b.h), action: { type: 'html' } });
     } else {
       const kind = tool === 'ellipse' ? 'ellipse' : tool === 'shape' ? E.shapeKind : 'rect';
       const sq = ['ellipse', 'star5', 'octagon', 'hexagon', 'plus', 'decision', 'diamond'].includes(kind);
@@ -1111,6 +1114,7 @@ function startCreate(e, fid, p0) {
     const id = addNode(fid, n, { label: '추가' });
     setTool('select');
     if (id && tool === 'text') setTimeout(() => editText(id, { selectAll: true, isNew: true }), 0);
+    if (id && tool === 'hotspot') AP.pickScreenshot(id);
   });
 }
 
@@ -1386,7 +1390,7 @@ export function finishEdit() {
   if (ops.length) commit(ops, '글 편집');
   else { scheduleRenderAll(ed.frame); ui(); }
 }
-function scheduleRenderAll(fid) { dirtyFrames = dirtyFrames === 'all' ? 'all' : new Set([...(dirtyFrames || []), fid]); scheduleRender(); }
+export function scheduleRenderAll(fid) { dirtyFrames = dirtyFrames === 'all' ? 'all' : new Set([...(dirtyFrames || []), fid]); scheduleRender(); }
 
 // 바탕(레이아웃) 칸 바로 고치기: 문서 정보 · 프레임 속성
 function editField(el, fid) {
@@ -1518,7 +1522,14 @@ function onDbl(e) {
     return;
   }
   if (n.type === 'description') { const t = $('#insp-desc-title'); if (t) t.focus(); }
-  if (n.type === 'hotspot' && n.action && n.action.type === 'html') { startLiveEmbed(n.id); return; }
+  if (n.type === 'hotspot' && n.action && n.action.type === 'html') {
+    const a = n.action;
+    if (E.embBusy.has(n.id)) { toast('자동 구현 중이에요. 조금만 기다려 주세요.'); return; }
+    if (a.asset || a.src || a.html) startLiveEmbed(n.id);
+    else if (a.shot) AP.generate(n.id);
+    else AP.pickScreenshot(n.id);
+    return;
+  }
   if (n.type === 'hotspot') { const t = $('#insp-hot-type'); if (t) t.focus(); }
 }
 
@@ -2009,7 +2020,14 @@ function onPaste(e) {
   if (isField(e.target) || E.editing || document.querySelector('.modal-bg')) return;
   const dt = e.clipboardData;
   const files = [...(dt.files || [])].filter((f) => f.type.startsWith('image/'));
-  if (files.length) { e.preventDefault(); addImageFiles(files); return; }
+  if (files.length) {
+    e.preventDefault();
+    // 인터랙션 영역을 고른 채 스크린샷을 붙여 넣으면 → 자동 구현
+    const hs = E.sel.length === 1 && E.idx.get(E.sel[0]);
+    if (hs && hs.type === 'hotspot' && (!hs.action || hs.action.type === 'html' || hs.action.type === 'none')) { AP.implementFromFile(hs.id, files[0]); return; }
+    addImageFiles(files);
+    return;
+  }
   const text = dt.getData('text/plain');
   if (text && text.startsWith('TNSPEC:')) {
     e.preventDefault();
@@ -2091,6 +2109,10 @@ export function boot() {
     if (cid) { const comp = E.doc.components.find((k) => k.id === cid); if (comp) insertInstance(cid, fid, { x: p.x - comp.w / 2, y: p.y - comp.h / 2 }); return; }
     const htmlFile = [...e.dataTransfer.files].find((f) => /\.html?$/i.test(f.name));
     if (htmlFile) { addHtmlFile(htmlFile, fid, p); return; }
+    // 인터랙션 영역 위에 스크린샷을 놓으면 → 자동 구현
+    const hsEl = e.target.closest('.n-hotspot');
+    const img = [...e.dataTransfer.files].find((f) => f.type.startsWith('image/'));
+    if (hsEl && img) { const hid = hsEl.dataset.id; const hs = E.idx.get(hid); if (hs && hs.type === 'hotspot') { select([hid]); AP.implementFromFile(hid, img); return; } }
     addImageFiles([...e.dataTransfer.files], fid, p);
   });
   window.addEventListener('keydown', onKey);
@@ -2104,6 +2126,7 @@ export function boot() {
   P.init(E);
   V.init(E);
   RB.init();
+  AP.initBridge();
   // 마지막으로 작업한 문서를 바로 연다 (없으면 시작 화면)
   let last = null;
   try { last = localStorage.getItem('tnspec:last'); } catch (e) { /* 저장소 차단 */ }

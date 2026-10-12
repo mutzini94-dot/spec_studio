@@ -10,7 +10,7 @@ export const FONTS = {
 export const FONT_NAMES = { m: '맑은 고딕', noto: 'Noto Sans KR', n: '나눔고딕', s: 'Cambria (영문 세리프)', a: 'Arial', mo: 'Montserrat' };
 const DASH = { solid: '', dash: '4 3', dot: '1 2.4', long: '8 4', dashdot: '6 3 1 3' };
 const hasText = (runs) => (runs || []).some((r) => r.img || (r.t && r.t.length));
-const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+export const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 function h(tag, cls, style) {
   const el = document.createElement(tag);
@@ -255,14 +255,37 @@ export function embedInfo(n, doc) {
   if (a.html) return { srcdoc: a.html, label: '붙여 넣은 HTML' };
   return null;
 }
+// 프로토타입 안의 data-spec="N" 요소 → 기획서 Description N 과 연결 (눌렀을 때 편집기에 알림)
+const BRIDGE = '<style>[data-spec]{cursor:pointer}[data-spec]:hover{outline:2px dashed rgba(229,57,53,.75);outline-offset:1px}</style>'
+  + '<script>document.addEventListener("click",function(e){var t=e.target&&e.target.closest&&e.target.closest("[data-spec]");if(t)parent.postMessage({tnspec:"spec",n:t.getAttribute("data-spec")},"*")},true)<\/script>';
+function withBridge(html) {
+  if (!html || !/data-spec=/.test(html)) return html;
+  const i = html.toLowerCase().lastIndexOf('</body>');
+  return i >= 0 ? html.slice(0, i) + BRIDGE + html.slice(i) : html + BRIDGE;
+}
 function renderEmbed(el, n, ctx) {
   const a = n.action || {};
   el.classList.add('embed');
   const info = embedInfo(n, ctx.doc);
   // 실제로 돌리는 곳: 미리보기, 편집 화면에서 "체험" 중인 영역. 썸네일 · 인쇄 · 평소 편집에서는 카드만
-  const live = info && !ctx.noEmbed && (ctx.mode === 'present' || ctx.liveId === n.id);
+  const shot = a.shot && ctx.doc.assets[a.shot];
+  const busy = ctx.busy && ctx.busy.has(n.id);
+  const live = info && !busy && !ctx.noEmbed && (ctx.mode === 'present' || ctx.liveId === n.id);
   if (!live) {
-    el.innerHTML = `<div class="emb-card"><b>⚡ HTML 프로토타입</b><span>${esc(info ? info.label : '내용이 비어 있어요 — 속성 패널에서 HTML을 넣으세요')}</span>${info && ctx.mode === 'edit' ? '<small>더블클릭하면 여기서 바로 체험 · ▶ 미리보기에서도 동작</small>' : ''}</div>`;
+    const edit = ctx.mode === 'edit';
+    if (shot) {
+      // 스크린샷으로 만든 프로토타입: 평소(썸네일 · 인쇄 포함)에는 스크린샷을 그대로 보여 준다
+      el.classList.add('emb-shot');
+      el.innerHTML = `<img class="emb-img" src="${shot.data}" alt="" draggable="false">`
+        + (busy ? '<div class="emb-busy"><i></i><b>화면을 분석해 동작하는 프로토타입을 만드는 중…</b><small>1~3분 걸릴 수 있어요. 다른 작업을 계속해도 돼요.</small></div>'
+          : edit ? `<div class="emb-badge">⚡ ${info ? (a.gen && a.gen.by === 'basic' ? '기본 프로토타입' : '자동 구현됨') + ' · 더블클릭해서 체험' : '스크린샷만 있음 · 속성 패널에서 자동 구현'}</div>` : '');
+      return;
+    }
+    if (!info) {
+      el.innerHTML = `<div class="emb-card emb-empty"><b>📷 화면 스크린샷 올리기</b><span>스크린샷을 올리면 그 화면이 실제로 동작하는 프로토타입으로 자동 구현돼요</span>${edit ? '<small>더블클릭 · 이미지를 여기로 끌어다 놓기 · 붙여넣기(Ctrl+V)</small>' : ''}</div>`;
+      return;
+    }
+    el.innerHTML = `<div class="emb-card"><b>⚡ HTML 프로토타입</b><span>${esc(info.label)}</span>${edit ? '<small>더블클릭하면 여기서 바로 체험 · ▶ 미리보기에서도 동작</small>' : ''}</div>`;
     return;
   }
   const cw = a.cw || n.w, ch = a.ch || n.h;
@@ -275,7 +298,7 @@ function renderEmbed(el, n, ctx) {
   fr.setAttribute('sandbox', 'allow-scripts allow-forms allow-popups allow-modals allow-pointer-lock' + (a.sameOrigin ? ' allow-same-origin' : ''));
   fr.title = n.name || 'HTML 프로토타입';
   fr.style.cssText = `width:${cw}px;height:${ch}px;transform:scale(${kx},${ky});transform-origin:0 0`;
-  if (info.src) fr.src = info.src; else fr.srcdoc = info.srcdoc;
+  if (info.src) fr.src = info.src; else fr.srcdoc = withBridge(info.srcdoc);
   box.appendChild(fr);
   el.appendChild(box);
   if (ctx.liveId === n.id && ctx.mode === 'edit') el.classList.add('emb-live');

@@ -20,3 +20,41 @@
 .edit-mode .ch-desc-r.ch-desc-empty:hover .ch-desc-t::after { content: "더블클릭해서 입력"; color: #8a94a6; font-size: 7px; }
 .ch-desc-r.editing { background: #fff; box-shadow: inset 0 0 0 1.5px #2f80ff; }
 .ch-desc-r.editing .ch-desc-t { outline: none; cursor: text; user-select: text; -webkit-user-select: text; min-height: 1.4em; }
+
+/* 스크린샷 → 자동 구현 */
+.n-hotspot.embed.emb-shot { background: #fff; border-color: #9ec2ff; }
+.emb-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none; user-select: none; }
+.emb-badge { position: absolute; right: 6px; bottom: 6px; background: rgba(29, 95, 209, .92); color: #fff; font: 600 10px/1.7 var(--ui); padding: 0 8px; border-radius: 4px; pointer-events: none; box-shadow: 0 1px 4px rgba(0, 0, 0, .25); }
+.emb-busy { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; background: rgba(255, 255, 255, .78); color: #1d5fd1; font-family: var(--ui); text-align: center; padding: 10px; }
+.emb-busy b { font-size: 12px; }
+.emb-busy small { font-size: 10px; color: #3b4a66; }
+.emb-busy i { width: 26px; height: 26px; border-radius: 50%; border: 3px solid #cfe0ff; border-top-color: #2f80ff; animation: embSpin 0.9s linear infinite; }
+@keyframes embSpin { to { transform: rotate(360deg); } }
+.emb-card.emb-empty { border: 2px dashed #9ec2ff; border-radius: 4px; background: #f4f8ff; }
+.emb-card.emb-empty b { font-size: 13px; }
+.emb-card.emb-empty span { white-space: normal; max-width: 90%; }
+#present .n-hotspot.embed.emb-shot { border: 0; }
+/* 프로토타입에서 누른 요소와 연결된 Description 반짝 */
+.spec-flash { animation: specFlash 1.4s ease-out; }
+.n-description.spec-flash { z-index: 9; }
+@keyframes specFlash { 0%, 40% { box-shadow: 0 0 0 4px rgba(255, 196, 0, .95), 0 0 14px 4px rgba(255, 196, 0, .7); background-color: #fff6c7; } 100% { box-shadow: 0 0 0 0 transparent; } }
+@media (prefers-reduced-motion: reduce) { .spec-flash, .emb-busy i { animation: none; } }
+
+/* 속성 패널: 자동 구현 */
+.auto-box { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 8px; }
+.auto-steps { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--tx2); }
+.auto-steps span { padding: 1px 6px; border-radius: 99px; border: 1px solid var(--line); }
+.auto-steps span.on { color: var(--acc); border-color: var(--acc); }
+.auto-steps span.cur { color: #fff; background: var(--acc); border-color: var(--acc); }
+.auto-steps i { font-style: normal; opacity: .6; }
+.auto-shot { display: flex; gap: 8px; align-items: center; }
+.auto-shot img { width: 72px; height: 48px; object-fit: cover; border-radius: 4px; border: 1px solid var(--line); background: #fff; }
+.auto-shot div { display: flex; flex-direction: column; gap: 1px; font-size: 11px; min-width: 0; }
+.auto-shot b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.auto-shot span { color: var(--tx2); }
+.auto-ai code { font-size: 10px; }
+.auto-adv { margin: 4px 0 8px; }
+.auto-adv > summary { cursor: pointer; color: var(--tx2); font-size: 12px; margin-bottom: 6px; }
+/* 배지는 마우스를 올렸거나 골랐을 때만 (스크린샷을 가리지 않게) */
+.emb-badge { opacity: 0; transition: opacity .12s; }
+.n-hotspot.embed.emb-shot:hover .emb-badge, .n-hotspot.embed.emb-shot.sel-on .emb-badge { opacity: 1; }

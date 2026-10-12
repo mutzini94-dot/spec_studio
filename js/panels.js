@@ -7,6 +7,7 @@ import { renderFrame, renderNode, FONT_NAMES, collectDescriptions, SHAPES, SHAPE
 import { DOC_TEMPLATES, LAYOUT_INFO } from './templates.js';
 import * as store from './store.js';
 import * as CM from './contextmenu.js';
+import * as AP from './autoproto.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -1053,7 +1054,7 @@ function descInspector(box, n) {
 function hotspotInspector(box, n) {
   const s = section('인터랙션 영역', '미리보기(▶)에서 동작');
   const a = n.action || { type: 'none' };
-  const t = selectField(a.type, [['none', '동작 없음'], ['goto', '다른 프레임으로 이동'], ['url', '링크 열기'], ['note', '메모 띄우기'], ['html', 'HTML 프로토타입 (영역 안에서 동작)']], [n.id], 'action.type', { label: '인터랙션 동작' });
+  const t = selectField(a.type, [['none', '동작 없음'], ['goto', '다른 프레임으로 이동'], ['url', '링크 열기'], ['note', '메모 띄우기'], ['html', '화면 프로토타입 (스크린샷 → 자동 구현)']], [n.id], 'action.type', { label: '인터랙션 동작' });
   t.querySelector('select').id = 'insp-hot-type';
   s.appendChild(row('동작', t));
   if (a.type === 'html') { htmlEmbedInspector(s, n, a); box.appendChild(s); return; }
@@ -1073,10 +1074,55 @@ function hotspotInspector(box, n) {
 }
 
 // HTML 프로토타입: 내용(파일 · 저장소 · 주소 · 코드) · 원래 크기 · 맞춤 · 체험
+// 서버의 AI 자동 구현 사용 가능 여부 (한 번만 묻는다)
+let aiState = null;
+function checkAI() {
+  if (aiState) return;
+  aiState = { pending: true };
+  fetch('/api/ping', { cache: 'no-store' }).then((r) => r.json()).then((j) => { aiState = { ai: !!j.ai, model: j.model, server: true }; }).catch(() => { aiState = { ai: false, server: false }; }).finally(() => renderRight());
+}
+function autoSection(s, n, a) {
+  checkAI();
+  const shot = a.shot && E.doc.assets[a.shot];
+  const busy = E.embBusy.has(n.id);
+  const box = el('<div class="auto-box"></div>');
+  box.appendChild(el('<div class="auto-steps"><span class="on">① 영역</span><i>›</i><span class="' + (shot ? 'on' : 'cur') + '">② 스크린샷</span><i>›</i><span class="' + (a.gen ? 'on' : shot ? 'cur' : '') + '">③ 자동 구현</span></div>'));
+  if (!shot) {
+    const b = el('<div class="btns"></div>');
+    b.appendChild(btn('📷 화면 스크린샷 올리기', '올리면 바로 동작하는 프로토타입으로 자동 구현돼요', () => AP.pickScreenshot(n.id), 'primary wide'));
+    box.appendChild(b);
+    box.appendChild(el('<div class="muted">이미지를 영역 위에 끌어다 놓거나, 영역을 고른 채 Ctrl+V로 붙여 넣어도 돼요.</div>'));
+  } else {
+    const g = a.gen;
+    const when = g && g.at ? new Date(g.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+    box.appendChild(el(`<div class="auto-shot"><img src="${shot.data}" alt=""><div><b>${esc(shot.name || '스크린샷')}</b><span>${shot.w}×${shot.h}px</span><span>${busy ? '⏳ 자동 구현 중…' : g ? (g.by === 'ai' ? '✨ AI 자동 구현' + (g.model ? ' · ' + esc(g.model) : '') : '기본 프로토타입 (AI 없이)') + ' · ' + when : '아직 구현 전'}</span></div></div>`));
+    const req = el(`<textarea id="insp-auto-req" placeholder="추가 요청 (선택) — 예: 입력창에 쓰고 Enter를 누르면 채팅 목록에 메시지 추가, 설정 버튼은 메뉴 열기" style="min-height:52px">${esc(a.request || '')}</textarea>`);
+    req.addEventListener('keydown', (ev) => ev.stopPropagation());
+    box.appendChild(req);
+    const b = el('<div class="btns"></div>');
+    const go = btn(busy ? '⏳ 만드는 중…' : g ? '✨ 다시 자동 구현' : '✨ 자동 구현', '스크린샷과 이 화면의 Description을 보고 동작하는 HTML을 만들어요', () => AP.generate(n.id, req.value.trim()), 'primary wide');
+    if (busy) go.disabled = true;
+    b.appendChild(go);
+    b.appendChild(btn('스크린샷 바꾸기', '새 스크린샷으로 다시 구현', () => AP.pickScreenshot(n.id), 'wide'));
+    box.appendChild(b);
+  }
+  const st = aiState || {};
+  box.appendChild(el(`<div class="muted auto-ai">${st.pending ? 'AI 연결 확인 중…'
+    : st.ai ? `AI 자동 구현 사용 가능 (${esc(st.model || '')}). 스크린샷과 Description이 Anthropic API로 전송돼요.`
+    : st.server ? 'AI 키가 없어 <b>기본 프로토타입</b>(스크린샷 + Description 번호 누르기)으로 만들어요. ANTHROPIC_API_KEY 환경 변수나 <code>spec-studio/tools/ai.key</code>에 키를 넣고 서버를 다시 켜면 실제로 동작하는 화면으로 구현돼요.'
+    : 'Spec Studio 서버(tools/serve.py)가 아니어서 <b>기본 프로토타입</b>으로 만들어요.'}</div>`));
+  box.appendChild(el('<div class="muted">프로토타입 안에서 <b>data-spec</b>이 달린 요소를 누르면 같은 번호의 Description이 반짝여요.</div>'));
+  s.appendChild(box);
+}
 function htmlEmbedInspector(s, n, a) {
+  autoSection(s, n, a);
   const info = embedInfo(n, E.doc);
   const src = a.asset ? 'asset' : a.src ? 'src' : a.html ? 'html' : '';
-  s.appendChild(el(`<div class="muted" style="margin:2px 0 8px">${info ? `내용: <b>${esc(info.label)}</b>${a.asset && E.doc.assets[a.asset] ? ` · ${Math.round((E.doc.assets[a.asset].size || 0) / 1024)}KB (문서에 저장됨)` : a.src ? ' · 주소로 연결' : ''}` : '아직 내용이 없어요. 아래에서 HTML을 넣으세요.'}</div>`));
+  const outer = s;
+  const adv = el(`<details class="auto-adv"${info && !a.shot ? ' open' : ''}><summary>HTML 직접 넣기 · 크기 · 맞춤</summary></details>`);
+  outer.appendChild(adv);
+  s = adv;
+  s.appendChild(el(`<div class="muted" style="margin:2px 0 8px">${info ? `내용: <b>${esc(info.label)}</b>${a.asset && E.doc.assets[a.asset] ? ` · ${Math.round((E.doc.assets[a.asset].size || 0) / 1024)}KB (문서에 저장됨)` : a.src ? ' · 주소로 연결' : ''}` : '아직 내용이 없어요. 스크린샷 자동 구현 대신 HTML을 직접 넣을 수도 있어요.'}</div>`));
   const setContent = (patch, label) => {
     const next = Object.assign({}, a, { asset: undefined, src: undefined, html: undefined }, patch);
     Object.keys(next).forEach((k) => next[k] === undefined && delete next[k]);
@@ -1122,11 +1168,13 @@ function htmlEmbedInspector(s, n, a) {
   const so = el(`<label class="chk" style="margin:4px 0 8px"><input type="checkbox" ${a.sameOrigin ? 'checked' : ''}> 같은 출처 허용 (localStorage가 필요한 페이지만 · 믿을 수 있는 HTML일 때)</label>`);
   so.querySelector('input').onchange = (ev) => Ed.commit([{ op: 'set', id: n.id, key: 'action.sameOrigin', value: ev.target.checked || undefined }], '보안 설정');
   s.appendChild(so);
+  s = outer;
+  if (!info) return;
   const go = el('<div class="btns"></div>');
   go.appendChild(btn(E.liveEmbed === n.id ? '■ 체험 끝내기 (Esc)' : '▶ 여기서 체험 (더블클릭)', '편집 화면에서 바로 눌러 보기', () => (E.liveEmbed === n.id ? Ed.stopLiveEmbed() : Ed.startLiveEmbed(n.id)), 'primary wide'));
   go.appendChild(btn('미리보기에서 보기', 'Shift+F5', () => present(Ed.frameOfNode(n.id)), 'wide'));
   s.appendChild(go);
-  s.appendChild(el('<div class="muted" style="margin-top:6px">프로토타입은 편집기와 분리된 안전한 틀(sandbox)에서 실행돼요. 썸네일 · 인쇄에는 카드로만 나와요.</div>'));
+  s.appendChild(el('<div class="muted" style="margin-top:6px">프로토타입은 편집기와 분리된 안전한 틀(sandbox)에서 실행돼요. 썸네일 · 인쇄에는 스크린샷(없으면 카드)으로 나와요.</div>'));
 }
 
 function instanceInspector(box, n) {
@@ -1252,8 +1300,8 @@ export async function home(e, first) {
   const bg = modal(`<header><h2>투네이션 상세기획서 스튜디오</h2><p>기획서양식.pdf 를 기본 템플릿으로, 문서 → 페이지 → 프레임 → 노드 구조의 JSON 문서를 편집합니다.</p></header>
     <div class="body">
       <h3>새로 만들기</h3><div class="tpl-grid" id="tpls"></div>
-      <h3>PPTX · PDF 가져오기</h3>
-      <div class="drop-zone" id="h-drop" tabindex="0"><b>⬆ 기획서 PPTX(또는 PDF)를 여기에 끌어다 놓거나 눌러서 고르세요</b><small>올리는 즉시 편집 가능한 문서(JSON)로 바뀌어 열려요 · 표지 · 개정 이력 · 화면 설계 등 페이지 종류는 자동 판별</small></div>
+      <h3>PDF · PPTX 기획서 가져오기</h3>
+      <div class="drop-zone" id="h-drop" tabindex="0"><b>⬆ 기획서 PDF(또는 PPTX)를 여기에 끌어다 놓거나 눌러서 고르세요</b><small>올리는 즉시 이 플랫폼 문서로 바뀌어 열려요 · 표지 · 개정 이력 · 기본 정책 · 간지 · 화면 설계 자동 판별 · 표 · 글 · 이미지 · 주석은 고칠 수 있는 객체로 · 화면의 번호 원은 Description과 연결 · 글자 없는 화면 캡처는 화면 이미지로(바로 자동 구현 가능)</small></div>
       <h3>열기</h3>
       <div class="actions"><button class="ib primary" id="h-open">📂 파일 열기 (.tnspec.json)</button><button class="ib" id="h-sample-pptx">📄 샘플: 채팅 기획서 (PPTX에서 가져옴)</button><button class="ib" id="h-sample">📄 샘플: 채팅 기획서 (PDF에서 가져옴)</button><button class="ib" id="h-import">PPTX · PDF → JSON 가져오기 방법</button></div>
       <h3>최근 문서 <small style="color:var(--tx3);font-weight:400">— 이 브라우저에 자동 저장된 문서</small></h3><div class="recent" id="recent"><div class="muted">불러오는 중…</div></div>

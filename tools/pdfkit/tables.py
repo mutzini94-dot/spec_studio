@@ -66,7 +66,9 @@ def convert(page, t, spans, fills, icon, R, scale=1.0, style=None):
         c0, c1 = near(xs, cell.x0), near(xs, cell.x1)
         r0, r1 = near(ys, cell.y0), near(ys, cell.y1)
         if c1 <= c0 or r1 <= r0 or owned[r0][c0]: continue
-        mine = [s for s in spans if cell.contains(pymupdf.Point((s['bbox'].x0 + s['bbox'].x1) / 2, (s['bbox'].y0 + s['bbox'].y1) / 2))]
+        mine = [s for s in spans if cell.contains(pymupdf.Point((s['bbox'].x0 + s['bbox'].x1) / 2, (s['bbox'].y0 + s['bbox'].y1) / 2))
+                # 그림은 칸 안에 들어가는 작은 아이콘만 (여러 칸에 걸친 띠 · 그림자 그림이 칸을 늘리지 않게)
+                and (s['kind'] != 'i' or (s['bbox'].height <= cell.height + 2 and (s['bbox'] & cell).get_area() >= s['bbox'].get_area() * .8))]
         texts = [s for s in mine if s['kind'] == 't' and s['text'].strip()]
         dom = dict(bold=False, color=base_color, size=base_size, font='MalgunGothic')
         for key in ('bold', 'color', 'size', 'font'):
