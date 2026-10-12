@@ -7,15 +7,26 @@ TITLE_BOX = (18, 33, 200, 52)
 import pymupdf
 from PIL import Image
 
+def _rgb(pix):
+    if pix.alpha: pix = pymupdf.Pixmap(pix, 0)
+    if pix.n != 3: pix = pymupdf.Pixmap(pymupdf.csRGB, pix)   # 회색조 · CMYK → RGB
+    return Image.frombytes('RGB', (pix.width, pix.height), pix.samples)
+
 def _pil(doc, xref):
     pix = pymupdf.Pixmap(doc, xref)
     sm = doc.xref_get_key(xref, 'SMask')
     if sm[0] == 'xref':
-        if pix.alpha: pix = pymupdf.Pixmap(pix, 0)
-        if pix.n > 3: pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
-        pix = pymupdf.Pixmap(pix, pymupdf.Pixmap(doc, int(sm[1].split()[0])))
-    elif pix.n - pix.alpha != 3:
-        pix = pymupdf.Pixmap(pymupdf.csRGB, pix)   # 회색조 · CMYK → RGB
+        im = _rgb(pix)
+        try:
+            mpix = pymupdf.Pixmap(doc, int(sm[1].split()[0]))
+            if mpix.n != 1: mpix = pymupdf.Pixmap(pymupdf.csGRAY, mpix)
+            mask = Image.frombytes('L', (mpix.width, mpix.height), mpix.samples)
+            # 투명도 마스크가 그림과 크기가 다른 PDF도 있다 → 그림 크기에 맞춰 늘린다
+            if mask.size != im.size: mask = mask.resize(im.size, Image.BILINEAR)
+            im = im.convert('RGBA'); im.putalpha(mask)
+        except Exception:
+            pass   # 마스크를 못 읽으면 불투명 그림으로
+        return im
     if pix.n - pix.alpha != 3:
         pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
     return Image.frombytes('RGBA' if pix.alpha else 'RGB', (pix.width, pix.height), pix.samples)

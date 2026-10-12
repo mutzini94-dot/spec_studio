@@ -420,203 +420,212 @@ def convert(src, out_path, title=None, dividers=None):
         if layout == 'divider' or cur is None:
             cur = new_page(('%s %s' % (frame['props']['number'], frame['props']['title'])) if layout == 'divider' else '개요')
 
-        if is_img:
-            # 화면 캡처 페이지: 흰 여백을 잘라낸 화면 이미지 한 장 (잠그지 않음 → 바로 화면 프로토타입으로 바꿀 수 있게)
-            crop, (x0, y0, x1, y1) = trim_white(render(orig, BG_SCALE))
-            k = s / BG_SCALE
-            aid = assets.add(crop, 'WEBP', 90, 'PDF %d쪽 화면' % (pno + 1))
-            nth = sum(1 for p in pages for f in p['frames'] if f.get('_img')) + 1
-            frame['name'] = '화면 %d' % nth
-            frame['_img'] = True
-            frame['nodes'] = [{'id': ids('ima'), 'type': 'image', 'name': '화면 이미지 (PDF %d쪽)' % (pno + 1), 'x': R(x0 * k), 'y': R(y0 * k),
-                               'w': R((x1 - x0) * k), 'h': R((y1 - y0) * k), 'asset': aid, 'fit': 'fill'}]
-        elif layout in AREAS:
-            area, tbox = AREAS[layout]
-            area_pdf = tuple(v / s for v in area)
-            for mod in (frames, heads, imgx, mtext): mod.AREA = area_pdf
-            for mod in (heads, mtext): mod.TITLE_BOX = tuple(v / s for v in tbox) if tbox else None
-            nodes = []
-            overlay_keep = []   # Description 패널 위로 걸친 팝업 등 (배경에서 지우지 않음)
-            marker_rects = []   # 번호 원 자리 (PDF 좌표): 글 · 배경에서 빼고 노드로 다시 그린다
-            # 레이아웃 칸 읽기
-            if layout == 'screen':
-                hdr = [l for l in lines if l['bbox'].y1 * s < 29]
-                pn = [l['text'] for l in hdr if 120 < l['bbox'].x0 * s < 678]
-                pj = [l['text'] for l in hdr if l['bbox'].x0 * s > 758]
-                st = [l['text'] for l in lines if tbox[0] <= l['bbox'].x0 * s <= tbox[2] and tbox[1] <= l['bbox'].y0 * s <= tbox[3] and l['bbox'].height * s > 10]
-                if pn: frame['props']['pageName'] = pn[0]
-                if pj and not meta['project']: meta['project'] = pj[0]
-                if st: frame['props']['screenTitle'] = st[0]
-                frame['name'] = frame['props'].get('pageName') or (st[0] if st else '화면 %d' % (pno + 1))
-                # Description 패널에 적힌 글 → Description 노드 (번호 위치는 사용자가 옮겨 붙임)
-                overlays = overlay_rects(orig, s)
-                overlay_keep += overlays
-                desc = [l for l in lines if l['bbox'].x0 * s > 757 and l['bbox'].y0 * s > 46 and l['bbox'].y1 * s < 521
-                        and not any(o.contains(l['bbox'].tl + (l['bbox'].br - l['bbox'].tl) * .5) for o in overlays)]
-                rows = panel_rows(orig, desc, s)
-                # 화면 위 빨간 번호 원 → 같은 번호 행과 짝지은 Description 노드 (pptx2json.link_descriptions 와 같은 규칙)
-                markers = number_circles(orig, lines, s, area)
-                marker_rects += [m['rect'] for m in markers]
-                used = set()
-                for i, r in enumerate(rows):
-                    title = r['lines'][0]['text'] if r['lines'] else ''
-                    d = {'id': ids('des'), 'type': 'description', 'name': 'Description %d' % r['num'], 'num': r['num'],
-                         'title': title, 'body': desc_body(r['lines'][1:]), 'color': '#e53935'}
-                    k = next((j for j, m in enumerate(markers) if j not in used and m['text'] == str(r['num'])), None)
-                    if k is not None:
-                        used.add(k)
-                        m = markers[k]
-                        d.update({'x': m['x'], 'y': m['y'], 'w': m['size'], 'h': m['size'], 'color': m['color']})
-                    else:
-                        d.update({'x': 732, 'y': R(58 + i * 22), 'w': 16, 'h': 16, 'marker': False})
-                    nodes.append(('z9', d))
-                # 짝이 없는 원(1-1, 2-1 같은 하위 번호 등)은 고칠 수 있는 번호 도형으로
-                for j, m in enumerate(markers):
-                    if j in used: continue
-                    nodes.append(('z9', {'id': ids('sha'), 'type': 'shape', 'name': '번호 %s' % m['text'], 'shape': 'ellipse', 'x': m['x'], 'y': m['y'], 'w': m['size'], 'h': m['size'],
-                                         'fill': m['color'], 'stroke': 'none', 'runs': [{'t': m['text']}],
-                                         'style': {'size': R(min(9, m['size'] * (.5 if len(m['text']) <= 2 else .38))), 'color': '#ffffff', 'bold': True, 'align': 'center', 'valign': 'middle', 'pad': 0}}))
-            elif layout == 'policy':
-                t = [l for l in big if l['bbox'].y0 * s < 80 and l['size'] * s >= 13]
-                frame['props']['title'] = t[0]['text'] if t else '기본 정책'
-                frame['name'] = frame['props']['title']
-            elif layout == 'history':
-                frame['name'] = 'Revision History'
-            else:
-                frame['name'] = (big[0]['text'][:30] if big else '페이지 %d' % (pno + 1))
-
-            # 표 (원본에서)
-            spans = tables.spans_of(orig)
-            fills = tables.fills_of(orig)
-            tlist = []
-            if layout == 'history':
-                rows = history_rows(orig, s)
-                nodes.append(('z5', revision_table(ids, rows)))
-                if rows and rows[-1][1]: meta['version'] = rows[-1][1]
-                if rows and re.fullmatch(r'\d{4}-\d{2}-\d{2}', rows[-1][2]): meta['date'] = rows[-1][2]
-            for t in ([] if layout == 'history' else orig.find_tables().tables):
-                b = pymupdf.Rect(t.bbox)
-                if b.width * s > 900 and b.height * s > 450: continue                     # 머리말+Description 격자 전체
-                if layout == 'screen' and (b.y0 * s < 29 or b.x0 * s > 750): continue      # 머리말 · Description 칸
-                # 화면 설계의 "표"는 대개 화면 목업(팝업 · 목록이 겹친 그림)이라 표로 바꾸면 칸이 엉킨다.
-                # 글은 글 노드, 선 · 칸 · 버튼은 배경으로 두는 편이 원본과 똑같다 (SCREEN_TABLES=True 면 표로)
-                if layout == 'screen' and not SCREEN_TABLES: continue
-                if b.y1 * s < area[1] or b.y0 * s > area[3]: continue
-                if len(t.rows) < 1 or b.width * s < 20: continue
-                tlist.append(t)
-            icon_cache = {}
-            def icon(sp):
-                x = sp.get('xref') or 0
-                if not x: return None
-                if x not in icon_cache:
-                    try: icon_cache[x] = assets.add(pil_xref(pristine, x), 'PNG', name='icon')
-                    except Exception: icon_cache[x] = None
-                return icon_cache[x]
-            style = {'border': 'dotted', 'borderColor': '#b3b3b3', 'topRule': 2} if layout == 'history' else ({'border': 'hlines', 'borderColor': '#e6ebf1'} if layout == 'policy' else None)
-            avoid = [(60 / s, 66 / s, 915 / s, 512 / s)] if layout == 'history' else []
-            n_avoid = len(avoid)   # 이 뒤에 더하는 표 자리와 달리 번호 원은 배경에서 원 모양으로만 지운다
-            avoid += [(r.x0 - .5, r.y0 - .5, r.x1 + .5, r.y1 + .5) for r in marker_rects]
-            # 표 밑에 깔린 화면 캡처 조각(버튼 등이 그려진 그림): 표 아래 이미지 노드로 그대로 둔다
-            under = set()
-            for t in tlist:
-                T = pymupdf.Rect(t.bbox)
-                cell = T.get_area() / max(1, sum(len(r.cells) for r in t.rows))
-                for info in orig.get_image_info(xrefs=True):
-                    b = pymupdf.Rect(info['bbox'])
-                    key = (info.get('xref'), tuple(round(v) for v in b))
-                    if not info.get('xref') or key in under or b.get_area() < cell * 4 or (b & T).get_area() < b.get_area() * .25: continue
-                    try: aid = assets.add(pil_xref(pristine, info['xref']), 'WEBP', 88, 'image')
-                    except Exception: continue
-                    under.add(key)
-                    nodes.append(('z4', {'id': ids('ima'), 'type': 'image', 'name': '표 밑 그림', 'x': R(b.x0 * s), 'y': R(b.y0 * s), 'w': R(b.width * s), 'h': R(b.height * s), 'asset': aid, 'fit': 'fill'}))
-            # 칸 안에 그려진 작은 채운 도형(버튼 · 배지 등): 표는 칸 배경만 알므로 표 바로 아래 도형으로 되살린다
-            hexc = lambda c: '#%02x%02x%02x' % tuple(int(round(v * 255)) for v in c[:3])
-            for t in tlist:
-                T = pymupdf.Rect(t.bbox)
-                cells = [pymupdf.Rect(c) for r in t.rows for c in r.cells if c]
-                for dr in orig.get_drawings():
-                    r, f = dr['rect'], dr.get('fill')
-                    if not f or r.width < 4 or r.height < 4 or not T.contains(r): continue
-                    home = next((c for c in cells if c.contains(r)), None)
-                    if not home or r.get_area() > home.get_area() * .7: continue          # 칸 배경은 표가 그린다
-                    if min(r.x0 - home.x0, home.x1 - r.x1, r.y0 - home.y0, home.y1 - r.y1) < 1: continue   # 칸 테두리에 붙은 건 잘게 나뉜 칸 배경
-                    if f[0] > .75 and f[1] < .45 and f[2] < .35 and abs(r.width - r.height) < 2.5: continue   # 번호 원
-                    sh = {'id': ids('sha'), 'type': 'shape', 'name': '칸 안 도형', 'shape': 'rect', 'x': R(r.x0 * s), 'y': R(r.y0 * s), 'w': R(r.width * s), 'h': R(r.height * s),
-                          'fill': hexc(f), 'stroke': hexc(dr['color']) if dr.get('color') else 'none', 'strokeWidth': R(dr.get('width') or 1) if dr.get('color') else 0,
-                          'radius': R(min(r.width, r.height) * s * .18)}
-                    nodes.append(('z45', sh))
-            for t in tlist:
-                tb = tables.convert(orig, t, spans, fills, icon, R, s, style)
-                nodes.append(('z5', dict({'id': ids('tab'), 'type': 'table', 'name': '표'}, **tb)))
-                b = t.bbox
-                avoid.append((b[0] - 2, b[1] - 2, b[2] + 2, b[3] + 2))
-            # 빨간 주석 (원본에서 벡터로)
-            for el in ann.extract(doc, [pno]).get(pno, []):
-                if el['t'] == 'box':
-                    nodes.append(('z7', {'id': ids('sha'), 'type': 'shape', 'name': '주석 박스', 'x': R(el['x'] * s), 'y': R(el['y'] * s), 'w': R(el['w'] * s), 'h': R(el['h'] * s),
-                                         'shape': 'rect', 'fill': 'none', 'stroke': '#ff0000', 'strokeWidth': 1, 'dash': 'dash', 'radius': 0}))
+        try:
+            if is_img:
+                # 화면 캡처 페이지: 흰 여백을 잘라낸 화면 이미지 한 장 (잠그지 않음 → 바로 화면 프로토타입으로 바꿀 수 있게)
+                crop, (x0, y0, x1, y1) = trim_white(render(orig, BG_SCALE))
+                k = s / BG_SCALE
+                aid = assets.add(crop, 'WEBP', 90, 'PDF %d쪽 화면' % (pno + 1))
+                nth = sum(1 for p in pages for f in p['frames'] if f.get('_img')) + 1
+                frame['name'] = '화면 %d' % nth
+                frame['_img'] = True
+                frame['nodes'] = [{'id': ids('ima'), 'type': 'image', 'name': '화면 이미지 (PDF %d쪽)' % (pno + 1), 'x': R(x0 * k), 'y': R(y0 * k),
+                                   'w': R((x1 - x0) * k), 'h': R((y1 - y0) * k), 'asset': aid, 'fit': 'fill'}]
+            elif layout in AREAS:
+                area, tbox = AREAS[layout]
+                area_pdf = tuple(v / s for v in area)
+                for mod in (frames, heads, imgx, mtext): mod.AREA = area_pdf
+                for mod in (heads, mtext): mod.TITLE_BOX = tuple(v / s for v in tbox) if tbox else None
+                nodes = []
+                overlay_keep = []   # Description 패널 위로 걸친 팝업 등 (배경에서 지우지 않음)
+                marker_rects = []   # 번호 원 자리 (PDF 좌표): 글 · 배경에서 빼고 노드로 다시 그린다
+                # 레이아웃 칸 읽기
+                if layout == 'screen':
+                    hdr = [l for l in lines if l['bbox'].y1 * s < 29]
+                    pn = [l['text'] for l in hdr if 120 < l['bbox'].x0 * s < 678]
+                    pj = [l['text'] for l in hdr if l['bbox'].x0 * s > 758]
+                    st = [l['text'] for l in lines if tbox[0] <= l['bbox'].x0 * s <= tbox[2] and tbox[1] <= l['bbox'].y0 * s <= tbox[3] and l['bbox'].height * s > 10]
+                    if pn: frame['props']['pageName'] = pn[0]
+                    if pj and not meta['project']: meta['project'] = pj[0]
+                    if st: frame['props']['screenTitle'] = st[0]
+                    frame['name'] = frame['props'].get('pageName') or (st[0] if st else '화면 %d' % (pno + 1))
+                    # Description 패널에 적힌 글 → Description 노드 (번호 위치는 사용자가 옮겨 붙임)
+                    overlays = overlay_rects(orig, s)
+                    overlay_keep += overlays
+                    desc = [l for l in lines if l['bbox'].x0 * s > 757 and l['bbox'].y0 * s > 46 and l['bbox'].y1 * s < 521
+                            and not any(o.contains(l['bbox'].tl + (l['bbox'].br - l['bbox'].tl) * .5) for o in overlays)]
+                    rows = panel_rows(orig, desc, s)
+                    # 화면 위 빨간 번호 원 → 같은 번호 행과 짝지은 Description 노드 (pptx2json.link_descriptions 와 같은 규칙)
+                    markers = number_circles(orig, lines, s, area)
+                    marker_rects += [m['rect'] for m in markers]
+                    used = set()
+                    for i, r in enumerate(rows):
+                        title = r['lines'][0]['text'] if r['lines'] else ''
+                        d = {'id': ids('des'), 'type': 'description', 'name': 'Description %d' % r['num'], 'num': r['num'],
+                             'title': title, 'body': desc_body(r['lines'][1:]), 'color': '#e53935'}
+                        k = next((j for j, m in enumerate(markers) if j not in used and m['text'] == str(r['num'])), None)
+                        if k is not None:
+                            used.add(k)
+                            m = markers[k]
+                            d.update({'x': m['x'], 'y': m['y'], 'w': m['size'], 'h': m['size'], 'color': m['color']})
+                        else:
+                            d.update({'x': 732, 'y': R(58 + i * 22), 'w': 16, 'h': 16, 'marker': False})
+                        nodes.append(('z9', d))
+                    # 짝이 없는 원(1-1, 2-1 같은 하위 번호 등)은 고칠 수 있는 번호 도형으로
+                    for j, m in enumerate(markers):
+                        if j in used: continue
+                        nodes.append(('z9', {'id': ids('sha'), 'type': 'shape', 'name': '번호 %s' % m['text'], 'shape': 'ellipse', 'x': m['x'], 'y': m['y'], 'w': m['size'], 'h': m['size'],
+                                             'fill': m['color'], 'stroke': 'none', 'runs': [{'t': m['text']}],
+                                             'style': {'size': R(min(9, m['size'] * (.5 if len(m['text']) <= 2 else .38))), 'color': '#ffffff', 'bold': True, 'align': 'center', 'valign': 'middle', 'pad': 0}}))
+                elif layout == 'policy':
+                    t = [l for l in big if l['bbox'].y0 * s < 80 and l['size'] * s >= 13]
+                    frame['props']['title'] = t[0]['text'] if t else '기본 정책'
+                    frame['name'] = frame['props']['title']
+                elif layout == 'history':
+                    frame['name'] = 'Revision History'
                 else:
-                    nodes.append(('z8', {'id': ids('con'), 'type': 'connector', 'name': '주석선', 'x': 0, 'y': 0, 'pts': [[R(x * s), R(y * s)] for x, y in el['pts']],
-                                         'stroke': '#ff0000', 'width': 1, 'dash': 'dash', 'route': 'straight', 'startCap': 'dot' if el['dot'] else 'none', 'endCap': 'arrow' if el['arrow'] else 'none'}))
-            ann.strip(doc, pno)
-            sid = frame['id']
-            fr = frames.extract(doc, [(pno, sid)])
-            ims, srcs, deletable = imgx.extract(doc, [(pno, sid, avoid)])
-            keymap = {}
-            for k, data in srcs.items():
-                raw = base64.b64decode(data.split(',', 1)[1])
-                keymap[k] = assets.add(Image.open(io.BytesIO(raw)), 'WEBP', 90, 'image')
-            for o in ims.get(sid, []):
-                nodes.append(('z3', {'id': ids('ima'), 'type': 'image', 'name': '이미지', 'x': R(o['x'] * s), 'y': R(o['y'] * s), 'w': R(o['w'] * s), 'h': R(o['h'] * s), 'asset': keymap[o['src']], 'fit': 'fill'}))
-            imgx.strip(doc, deletable)
-            hd = heads.extract(doc, [(pno, sid, avoid)], fr, ims)
-            for h in hd.get(sid, []):
-                nodes.append(('z6', {'id': ids('tex'), 'type': 'text', 'name': h['text'][:24], 'x': R(h['x'] * s - 1), 'y': R(h['y'] * s), 'w': R(h['w'] * s + 6), 'h': R(h['h'] * s),
-                                     'runs': [{'t': h['text']}], 'style': {'size': R(h['size'] * s), 'color': h['color'], 'bold': True, 'nowrap': True, 'lineHeight': 1.15}}))
-            mt = mtext.extract(doc, [(pno, sid, avoid)], ims, hd)
-            for m in mt.get(sid, []):
-                sp = m['spans']
-                base = max(set((x['size'], x['color'], x['font'], x['b']) for x in sp), key=lambda k: sum(len(x['t']) for x in sp if (x['size'], x['color'], x['font'], x['b']) == k))
-                runs = []
-                for x in sp:
-                    r = {'t': x['t']}
-                    if x['b'] != base[3]: r['b'] = bool(x['b'])
-                    if x['color'] != base[1]: r['color'] = x['color']
-                    if abs(x['size'] - base[0]) > .3: r['size'] = R(x['size'] * s)
-                    if x['font'] != base[2]: r['font'] = x['font']
-                    if x['i']: r['i'] = True
-                    if runs and {k: v for k, v in runs[-1].items() if k != 't'} == {k: v for k, v in r.items() if k != 't'}: runs[-1]['t'] += x['t']
-                    else: runs.append(r)
-                text = ''.join(x['t'] for x in sp).strip()
-                node = {'id': ids('tex'), 'type': 'text', 'name': text[:24] or '텍스트', 'x': R(m['x'] * s - .5), 'y': R(m['y'] * s), 'w': R(m['w'] * s + 4), 'h': R(m['h'] * s),
-                        'runs': runs, 'style': {'size': R(base[0] * s), 'color': base[1], 'font': base[2], 'nowrap': True, 'lineHeight': 1.15}}
-                if base[3]: node['style']['bold'] = True
-                if m.get('ct') or m.get('cb'): node['clip'] = [R(m['ct'] * s), R(m['cb'] * s)]
-                nodes.append(('z6', node))
-            mtext.strip(doc, pno)
-            # 남은 벡터 그림 → 배경 이미지
-            bg = render(page, BG_SCALE)
-            keep = [(bg.crop(box), box) for box in (tuple(int(round(v * BG_SCALE)) for v in (o.x0, o.y0, o.x1, o.y1)) for o in overlay_keep)]
-            dr = ImageDraw.Draw(bg)
-            circles = set(range(n_avoid, n_avoid + len(marker_rects)))
-            for i, (x0, y0, x1, y1) in enumerate([tuple(a) for a in avoid]):
-                box = [x0 / s * BG_SCALE, y0 / s * BG_SCALE, x1 / s * BG_SCALE, y1 / s * BG_SCALE]
-                if i in circles: dr.ellipse(box, fill=(255, 255, 255))
-                else: dr.rectangle(box, fill=(255, 255, 255))
-            for x0, y0, x1, y1 in chrome_boxes(layout):
-                dr.rectangle([x0 / s * BG_SCALE, y0 / s * BG_SCALE, x1 / s * BG_SCALE, y1 / s * BG_SCALE], fill=(255, 255, 255))
-            for im, box in keep:
-                # 팝업의 패널 쪽 부분만 되살린다 (화면 쪽은 이미 글 · 이미지 노드로 뽑았다)
-                cut = int(round(752 / s * BG_SCALE))
-                if box[2] > cut:
-                    bg.paste(im.crop((max(0, cut - box[0]), 0, im.width, im.height)), (max(box[0], cut), box[1]))
-            g = bg.convert('L')
-            ink = sum(g.histogram()[:245]) / (g.width * g.height)
-            if ink > .0008:
-                aid = assets.add(bg, 'WEBP', 84, 'PDF %d쪽 배경' % (pno + 1))
-                nodes.insert(0, ('z0', {'id': ids('ima'), 'type': 'image', 'name': '배경(PDF %d쪽)' % (pno + 1), 'x': 0, 'y': 0, 'w': W, 'h': H, 'asset': aid, 'fit': 'fill', 'locked': True, 'blend': 'multiply'}))
-            nodes.sort(key=lambda t: t[0])   # 겹침 순서: 배경 → 이미지 → 표 → 글 → 주석
-            frame['nodes'] = [n for _, n in nodes]
+                    frame['name'] = (big[0]['text'][:30] if big else '페이지 %d' % (pno + 1))
+
+                # 표 (원본에서)
+                spans = tables.spans_of(orig)
+                fills = tables.fills_of(orig)
+                tlist = []
+                if layout == 'history':
+                    rows = history_rows(orig, s)
+                    nodes.append(('z5', revision_table(ids, rows)))
+                    if rows and rows[-1][1]: meta['version'] = rows[-1][1]
+                    if rows and re.fullmatch(r'\d{4}-\d{2}-\d{2}', rows[-1][2]): meta['date'] = rows[-1][2]
+                for t in ([] if layout == 'history' else orig.find_tables().tables):
+                    b = pymupdf.Rect(t.bbox)
+                    if b.width * s > 900 and b.height * s > 450: continue                     # 머리말+Description 격자 전체
+                    if layout == 'screen' and (b.y0 * s < 29 or b.x0 * s > 750): continue      # 머리말 · Description 칸
+                    # 화면 설계의 "표"는 대개 화면 목업(팝업 · 목록이 겹친 그림)이라 표로 바꾸면 칸이 엉킨다.
+                    # 글은 글 노드, 선 · 칸 · 버튼은 배경으로 두는 편이 원본과 똑같다 (SCREEN_TABLES=True 면 표로)
+                    if layout == 'screen' and not SCREEN_TABLES: continue
+                    if b.y1 * s < area[1] or b.y0 * s > area[3]: continue
+                    if len(t.rows) < 1 or b.width * s < 20: continue
+                    tlist.append(t)
+                icon_cache = {}
+                def icon(sp):
+                    x = sp.get('xref') or 0
+                    if not x: return None
+                    if x not in icon_cache:
+                        try: icon_cache[x] = assets.add(pil_xref(pristine, x), 'PNG', name='icon')
+                        except Exception: icon_cache[x] = None
+                    return icon_cache[x]
+                style = {'border': 'dotted', 'borderColor': '#b3b3b3', 'topRule': 2} if layout == 'history' else ({'border': 'hlines', 'borderColor': '#e6ebf1'} if layout == 'policy' else None)
+                avoid = [(60 / s, 66 / s, 915 / s, 512 / s)] if layout == 'history' else []
+                n_avoid = len(avoid)   # 이 뒤에 더하는 표 자리와 달리 번호 원은 배경에서 원 모양으로만 지운다
+                avoid += [(r.x0 - .5, r.y0 - .5, r.x1 + .5, r.y1 + .5) for r in marker_rects]
+                # 표 밑에 깔린 화면 캡처 조각(버튼 등이 그려진 그림): 표 아래 이미지 노드로 그대로 둔다
+                under = set()
+                for t in tlist:
+                    T = pymupdf.Rect(t.bbox)
+                    cell = T.get_area() / max(1, sum(len(r.cells) for r in t.rows))
+                    for info in orig.get_image_info(xrefs=True):
+                        b = pymupdf.Rect(info['bbox'])
+                        key = (info.get('xref'), tuple(round(v) for v in b))
+                        if not info.get('xref') or key in under or b.get_area() < cell * 4 or (b & T).get_area() < b.get_area() * .25: continue
+                        try: aid = assets.add(pil_xref(pristine, info['xref']), 'WEBP', 88, 'image')
+                        except Exception: continue
+                        under.add(key)
+                        nodes.append(('z4', {'id': ids('ima'), 'type': 'image', 'name': '표 밑 그림', 'x': R(b.x0 * s), 'y': R(b.y0 * s), 'w': R(b.width * s), 'h': R(b.height * s), 'asset': aid, 'fit': 'fill'}))
+                # 칸 안에 그려진 작은 채운 도형(버튼 · 배지 등): 표는 칸 배경만 알므로 표 바로 아래 도형으로 되살린다
+                hexc = lambda c: '#%02x%02x%02x' % tuple(int(round(v * 255)) for v in c[:3])
+                for t in tlist:
+                    T = pymupdf.Rect(t.bbox)
+                    cells = [pymupdf.Rect(c) for r in t.rows for c in r.cells if c]
+                    for dr in orig.get_drawings():
+                        r, f = dr['rect'], dr.get('fill')
+                        if not f or r.width < 4 or r.height < 4 or not T.contains(r): continue
+                        home = next((c for c in cells if c.contains(r)), None)
+                        if not home or r.get_area() > home.get_area() * .7: continue          # 칸 배경은 표가 그린다
+                        if min(r.x0 - home.x0, home.x1 - r.x1, r.y0 - home.y0, home.y1 - r.y1) < 1: continue   # 칸 테두리에 붙은 건 잘게 나뉜 칸 배경
+                        if f[0] > .75 and f[1] < .45 and f[2] < .35 and abs(r.width - r.height) < 2.5: continue   # 번호 원
+                        sh = {'id': ids('sha'), 'type': 'shape', 'name': '칸 안 도형', 'shape': 'rect', 'x': R(r.x0 * s), 'y': R(r.y0 * s), 'w': R(r.width * s), 'h': R(r.height * s),
+                              'fill': hexc(f), 'stroke': hexc(dr['color']) if dr.get('color') else 'none', 'strokeWidth': R(dr.get('width') or 1) if dr.get('color') else 0,
+                              'radius': R(min(r.width, r.height) * s * .18)}
+                        nodes.append(('z45', sh))
+                for t in tlist:
+                    tb = tables.convert(orig, t, spans, fills, icon, R, s, style)
+                    nodes.append(('z5', dict({'id': ids('tab'), 'type': 'table', 'name': '표'}, **tb)))
+                    b = t.bbox
+                    avoid.append((b[0] - 2, b[1] - 2, b[2] + 2, b[3] + 2))
+                # 빨간 주석 (원본에서 벡터로)
+                for el in ann.extract(doc, [pno]).get(pno, []):
+                    if el['t'] == 'box':
+                        nodes.append(('z7', {'id': ids('sha'), 'type': 'shape', 'name': '주석 박스', 'x': R(el['x'] * s), 'y': R(el['y'] * s), 'w': R(el['w'] * s), 'h': R(el['h'] * s),
+                                             'shape': 'rect', 'fill': 'none', 'stroke': '#ff0000', 'strokeWidth': 1, 'dash': 'dash', 'radius': 0}))
+                    else:
+                        nodes.append(('z8', {'id': ids('con'), 'type': 'connector', 'name': '주석선', 'x': 0, 'y': 0, 'pts': [[R(x * s), R(y * s)] for x, y in el['pts']],
+                                             'stroke': '#ff0000', 'width': 1, 'dash': 'dash', 'route': 'straight', 'startCap': 'dot' if el['dot'] else 'none', 'endCap': 'arrow' if el['arrow'] else 'none'}))
+                ann.strip(doc, pno)
+                sid = frame['id']
+                fr = frames.extract(doc, [(pno, sid)])
+                ims, srcs, deletable = imgx.extract(doc, [(pno, sid, avoid)])
+                keymap = {}
+                for k, data in srcs.items():
+                    raw = base64.b64decode(data.split(',', 1)[1])
+                    keymap[k] = assets.add(Image.open(io.BytesIO(raw)), 'WEBP', 90, 'image')
+                for o in ims.get(sid, []):
+                    nodes.append(('z3', {'id': ids('ima'), 'type': 'image', 'name': '이미지', 'x': R(o['x'] * s), 'y': R(o['y'] * s), 'w': R(o['w'] * s), 'h': R(o['h'] * s), 'asset': keymap[o['src']], 'fit': 'fill'}))
+                imgx.strip(doc, deletable)
+                hd = heads.extract(doc, [(pno, sid, avoid)], fr, ims)
+                for h in hd.get(sid, []):
+                    nodes.append(('z6', {'id': ids('tex'), 'type': 'text', 'name': h['text'][:24], 'x': R(h['x'] * s - 1), 'y': R(h['y'] * s), 'w': R(h['w'] * s + 6), 'h': R(h['h'] * s),
+                                         'runs': [{'t': h['text']}], 'style': {'size': R(h['size'] * s), 'color': h['color'], 'bold': True, 'nowrap': True, 'lineHeight': 1.15}}))
+                mt = mtext.extract(doc, [(pno, sid, avoid)], ims, hd)
+                for m in mt.get(sid, []):
+                    sp = m['spans']
+                    base = max(set((x['size'], x['color'], x['font'], x['b']) for x in sp), key=lambda k: sum(len(x['t']) for x in sp if (x['size'], x['color'], x['font'], x['b']) == k))
+                    runs = []
+                    for x in sp:
+                        r = {'t': x['t']}
+                        if x['b'] != base[3]: r['b'] = bool(x['b'])
+                        if x['color'] != base[1]: r['color'] = x['color']
+                        if abs(x['size'] - base[0]) > .3: r['size'] = R(x['size'] * s)
+                        if x['font'] != base[2]: r['font'] = x['font']
+                        if x['i']: r['i'] = True
+                        if runs and {k: v for k, v in runs[-1].items() if k != 't'} == {k: v for k, v in r.items() if k != 't'}: runs[-1]['t'] += x['t']
+                        else: runs.append(r)
+                    text = ''.join(x['t'] for x in sp).strip()
+                    node = {'id': ids('tex'), 'type': 'text', 'name': text[:24] or '텍스트', 'x': R(m['x'] * s - .5), 'y': R(m['y'] * s), 'w': R(m['w'] * s + 4), 'h': R(m['h'] * s),
+                            'runs': runs, 'style': {'size': R(base[0] * s), 'color': base[1], 'font': base[2], 'nowrap': True, 'lineHeight': 1.15}}
+                    if base[3]: node['style']['bold'] = True
+                    if m.get('ct') or m.get('cb'): node['clip'] = [R(m['ct'] * s), R(m['cb'] * s)]
+                    nodes.append(('z6', node))
+                mtext.strip(doc, pno)
+                # 남은 벡터 그림 → 배경 이미지
+                bg = render(page, BG_SCALE)
+                keep = [(bg.crop(box), box) for box in (tuple(int(round(v * BG_SCALE)) for v in (o.x0, o.y0, o.x1, o.y1)) for o in overlay_keep)]
+                dr = ImageDraw.Draw(bg)
+                circles = set(range(n_avoid, n_avoid + len(marker_rects)))
+                for i, (x0, y0, x1, y1) in enumerate([tuple(a) for a in avoid]):
+                    box = [x0 / s * BG_SCALE, y0 / s * BG_SCALE, x1 / s * BG_SCALE, y1 / s * BG_SCALE]
+                    if i in circles: dr.ellipse(box, fill=(255, 255, 255))
+                    else: dr.rectangle(box, fill=(255, 255, 255))
+                for x0, y0, x1, y1 in chrome_boxes(layout):
+                    dr.rectangle([x0 / s * BG_SCALE, y0 / s * BG_SCALE, x1 / s * BG_SCALE, y1 / s * BG_SCALE], fill=(255, 255, 255))
+                for im, box in keep:
+                    # 팝업의 패널 쪽 부분만 되살린다 (화면 쪽은 이미 글 · 이미지 노드로 뽑았다)
+                    cut = int(round(752 / s * BG_SCALE))
+                    if box[2] > cut:
+                        bg.paste(im.crop((max(0, cut - box[0]), 0, im.width, im.height)), (max(box[0], cut), box[1]))
+                g = bg.convert('L')
+                ink = sum(g.histogram()[:245]) / (g.width * g.height)
+                if ink > .0008:
+                    aid = assets.add(bg, 'WEBP', 84, 'PDF %d쪽 배경' % (pno + 1))
+                    nodes.insert(0, ('z0', {'id': ids('ima'), 'type': 'image', 'name': '배경(PDF %d쪽)' % (pno + 1), 'x': 0, 'y': 0, 'w': W, 'h': H, 'asset': aid, 'fit': 'fill', 'locked': True, 'blend': 'multiply'}))
+                nodes.sort(key=lambda t: t[0])   # 겹침 순서: 배경 → 이미지 → 표 → 글 → 주석
+                frame['nodes'] = [n for _, n in nodes]
+        except Exception as e:
+            # 한 쪽이 실패해도 문서 전체는 가져온다: 그 쪽은 페이지 그림 한 장으로
+            print('[pdf2json] %d쪽 변환 실패 → 페이지 그림으로: %r' % (pno + 1, e), file=sys.stderr)
+            frame['layout'], frame['props'] = 'blank', {}
+            frame['name'] = frame['name'] or '페이지 %d' % (pno + 1)
+            aid = assets.add(render(orig, BG_SCALE), 'WEBP', 86, 'PDF %d쪽' % (pno + 1))
+            frame['nodes'] = [{'id': ids('ima'), 'type': 'image', 'name': 'PDF %d쪽 (그림)' % (pno + 1), 'x': 0, 'y': 0, 'w': W, 'h': H, 'asset': aid, 'fit': 'fill'}]
+            warnings.append('%d쪽은 자동 변환에 실패해 페이지 그림으로 넣었어요 (%s)' % (pno + 1, type(e).__name__))
         cur['frames'].append(frame)
         report.append('%2d쪽 %-8s %-24s 노드 %d' % (pno + 1, 'image' if is_img else layout, frame['name'][:24], len(frame['nodes'])))
         if is_img and not any('화면 캡처' in w for w in warnings):

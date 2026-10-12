@@ -5,6 +5,7 @@ import * as M from './model.js';
 import * as O from './ops.js';
 import * as Ed from './editor.js';
 import { collectDescriptions, esc } from './render.js';
+import * as API from './api.js';
 
 const E = new Proxy({}, { get: (_, k) => Ed.E[k], set: (_, k, v) => { Ed.E[k] = v; return true; } });
 const MAX_EDGE = 1600;   // Claude 비전 권장 크기 근처로 줄여 보낸다 (문서 크기도 줄어든다)
@@ -99,27 +100,26 @@ export async function generate(id, request) {
   Ed.scheduleRenderAll(fid);
   Ed.ui();
   let html = null, gen = null, why = '';
-  try {
-    const res = await fetch('/api/screen2html', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: shot.data, w: a.cw, h: a.ch, frame: f ? f.name : '', descriptions: descs, request: request || a.request || '' }),
-    });
-    const j = await res.json().catch(() => ({}));
+  const r = await API.call('/api/screen2html', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image: shot.data, w: a.cw, h: a.ch, frame: f ? f.name : '', descriptions: descs, request: request || a.request || '' }),
+  });
+  if (r.offline) why = 'Spec Studio 서버(tools/serve.py)에 연결할 수 없어 기본 프로토타입으로 만들었어요.';
+  else {
+    const res = r.res, j = r.body || {};
     if (res.ok && j.html) { html = j.html; gen = { by: 'ai', model: j.model, at: new Date().toISOString() }; if (j.truncated) why = '응답이 길어 일부가 잘렸을 수 있어요. 다시 만들어 보세요.'; }
     else if (res.status === 501) why = 'AI 키가 없어 기본 프로토타입으로 만들었어요. ' + (j.message || '');
     else why = (j.error || ('서버 오류 ' + res.status)) + ' — 기본 프로토타입으로 만들었어요.';
-  } catch (err) {
-    why = 'Spec Studio 서버(tools/serve.py)에 연결할 수 없어 기본 프로토타입으로 만들었어요.';
   }
   if (!html) { html = basicHTML(shot.data, a.cw, a.ch, descs); gen = { by: 'basic', at: new Date().toISOString() }; }
   E.embBusy.delete(id);
   const cur = E.idx.get(id);
   if (!cur || !cur.action || cur.action.shot !== a.shot) { Ed.scheduleRenderAll(fid); Ed.ui(); return; }   // 그동안 지워졌거나 바뀜
-  const r = Ed.htmlAssetOps(html, (f ? f.name : 'screen') + '.html');
-  const next = Object.assign({}, cur.action, { asset: r.aid, gen });
+  const ra = Ed.htmlAssetOps(html, (f ? f.name : 'screen') + '.html');
+  const next = Object.assign({}, cur.action, { asset: ra.aid, gen });
   if (request !== undefined) { if (request) next.request = request; else delete next.request; }
-  r.ops.push({ op: 'set', id, key: 'action', value: next });
-  Ed.commit(r.ops, '자동 구현');
+  ra.ops.push({ op: 'set', id, key: 'action', value: next });
+  Ed.commit(ra.ops, '자동 구현');
   Ed.toast(gen.by === 'ai' ? '자동 구현 완료! 더블클릭하면 여기서 바로 눌러 볼 수 있어요.' + (why ? ' ' + why : '') : why, gen.by !== 'ai' && !!why);
 }
 

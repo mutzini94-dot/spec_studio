@@ -8,6 +8,7 @@ import { DOC_TEMPLATES, LAYOUT_INFO } from './templates.js';
 import * as store from './store.js';
 import * as CM from './contextmenu.js';
 import * as AP from './autoproto.js';
+import * as API from './api.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -1079,7 +1080,7 @@ let aiState = null;
 function checkAI() {
   if (aiState) return;
   aiState = { pending: true };
-  fetch('/api/ping', { cache: 'no-store' }).then((r) => r.json()).then((j) => { aiState = { ai: !!j.ai, model: j.model, server: true }; }).catch(() => { aiState = { ai: false, server: false }; }).finally(() => renderRight());
+  API.findServer().then((s) => { aiState = s ? { ai: !!s.info.ai, model: s.info.model, server: true } : { ai: false, server: false }; }).finally(() => renderRight());
 }
 function autoSection(s, n, a) {
   checkAI();
@@ -1373,14 +1374,11 @@ export async function importFile(file) {
   if (!isImportable(file)) { Ed.toast('PPTX 또는 PDF 파일만 가져올 수 있어요. (.ppt 는 PowerPoint에서 .pptx로 저장해 주세요)', true); return; }
   const mb = (file.size / 1024 / 1024).toFixed(1);
   const bg = modal(`<header><h2>가져오는 중…</h2><p>${esc(file.name)} · ${mb}MB</p></header>
-    <div class="body"><div class="imp-progress"><i></i></div><div class="muted" style="margin-top:10px">도형 · 글 · 표 · 그림을 편집 가능한 요소로 바꾸고 있어요. 큰 파일은 몇 초 걸릴 수 있어요.</div></div>`, false);
-  let res, body;
-  try {
-    res = await fetch('/api/import', { method: 'POST', headers: { 'X-Filename': encodeURIComponent(file.name), 'Content-Type': 'application/octet-stream' }, body: file });
-    body = await res.json().catch(() => null);
-  } catch (err) { res = null; }
-  if (!res || res.status === 404 || res.status === 405 || res.status === 501 && !body || (!body && !res.ok)) {
-    // 정적 서버(python -m http.server · Vercel)에는 변환 API가 없다
+    <div class="body"><div class="imp-progress"><i></i></div><div class="muted" style="margin-top:10px">도형 · 글 · 표 · 그림을 편집 가능한 요소로 바꾸고 있어요. ${/\.pdf$/i.test(file.name) ? 'PDF는 쪽마다 2~3초 걸려요 (20쪽이면 1분쯤).' : '큰 파일은 몇 초 걸릴 수 있어요.'}</div></div>`, false);
+  // 같은 주소에 변환 API가 없으면(파일로 열기 · 정적 서버) 이 PC에 켜진 Spec Studio 서버를 찾아서 보낸다
+  const r = await API.call('/api/import', { method: 'POST', headers: { 'X-Filename': encodeURIComponent(file.name), 'Content-Type': 'application/octet-stream' }, body: file });
+  const res = r.res, body = r.body;
+  if (r.offline || !res || res.status === 404 || res.status === 405 || (!body && !res.ok)) {
     noServer(bg, file);
     return;
   }
@@ -1413,17 +1411,28 @@ export async function importFile(file) {
   bg.querySelector('[data-x="more"]').onclick = () => pickImport();
 }
 function noServer(bg, file) {
-  bg.querySelector('.modal').innerHTML = `<header><h2>변환 서버가 꺼져 있어요</h2><p>지금 주소는 정적 파일만 내보내는 서버라 ${esc(file.name)}을(를) 바꿀 수 없어요.</p></header>
+  const pdf = /\.pdf$/i.test(file.name);
+  bg.querySelector('.modal').innerHTML = `<header><h2>변환 서버를 기다리는 중…</h2><p>${esc(file.name)}을(를) 바꿀 Spec Studio 서버가 이 PC에서 켜져 있지 않아요. 서버가 켜지면 <b>자동으로 이어서 변환</b>해요.</p></header>
     <div class="body">
-      <h3>1. Spec Studio 서버로 다시 열기 (권장)</h3>
+      <div class="imp-progress wait"><i></i></div>
+      <h3>서버 켜기 (한 번만)</h3>
+      <div class="muted"><b>spec-studio 폴더의 "Spec Studio 실행.bat"</b> 을 더블클릭하거나, 저장소 폴더에서 아래 명령을 실행하세요.</div>
       <div class="code">python spec-studio/tools/serve.py</div>
-      <div class="muted" style="margin-top:6px">저장소 루트에서 실행하고 <b>http://localhost:5180/spec-studio/</b> 를 열면 PPTX를 올리는 즉시 변환돼요. (지금 쓰는 <code>python -m http.server</code> 대신 쓰면 됩니다)</div>
-      <h3>2. 명령으로 바꾼 뒤 열기</h3>
-      <div class="code">python spec-studio/tools/pptx2json.py "${esc(file.name)}" -o 결과.tnspec.json</div>
-      <div class="actions" style="margin-top:18px"><button class="ib primary" data-x="open">.tnspec.json 열기</button><button class="ib" data-x="close">닫기</button></div>
+      <h3>또는 명령으로 바꾼 뒤 열기</h3>
+      <div class="code">python spec-studio/tools/${pdf ? 'pdf2json' : 'pptx2json'}.py "${esc(file.name)}" -o 결과.tnspec.json</div>
+      <div class="actions" style="margin-top:18px"><button class="ib primary" data-x="retry">지금 다시 시도</button><button class="ib" data-x="open">.tnspec.json 열기</button><button class="ib" data-x="close">닫기</button></div>
     </div>`;
-  bg.querySelector('[data-x="open"]').onclick = () => Ed.openFromFile();
-  bg.querySelector('[data-x="close"]').onclick = () => (E.doc ? closeModal() : home(E, true));
+  let alive = true, timer = 0;
+  const stop = () => { alive = false; clearTimeout(timer); };
+  const tick = async () => {
+    if (!alive || !document.body.contains(bg)) return stop();
+    if (await API.findServer(true)) { stop(); importFile(file); return; }
+    timer = setTimeout(tick, 2000);
+  };
+  timer = setTimeout(tick, 2000);
+  bg.querySelector('[data-x="retry"]').onclick = () => { stop(); importFile(file); };
+  bg.querySelector('[data-x="open"]').onclick = () => { stop(); Ed.openFromFile(); };
+  bg.querySelector('[data-x="close"]').onclick = () => { stop(); E.doc ? closeModal() : home(E, true); };
 }
 
 function importHelp() {

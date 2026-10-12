@@ -9,3 +9,6 @@ node_modules/
 .DS_Store
 *.log
 tools/ai.key
+# 기획서 원본 (사내 문서) — 공개 저장소에 올리지 않음
+*.pdf
+*.pptx

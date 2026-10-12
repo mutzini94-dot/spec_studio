@@ -123,7 +123,25 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # 편집기 코드를 고친 뒤 새로고침하면 바로 반영되게
         if self.path.split('?')[0].endswith(('.js', '.css', '.html', '/')):
             self.send_header('Cache-Control', 'no-store')
+        # 다른 주소로 연 편집기(파일로 열기 · 다른 포트의 정적 서버)도 이 서버의 변환 API를 쓸 수 있게
+        origin = self.headers.get('Origin')
+        if origin and self.path.startswith('/api/') and self.cors_ok(origin):
+            self.send_header('Access-Control-Allow-Origin', origin)
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type, X-Filename')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+            self.send_header('Vary', 'Origin')
         super().end_headers()
+
+    def cors_ok(self, origin):
+        local = re.fullmatch(r'https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?', origin) is not None
+        if self.path.split('?')[0] == '/api/screen2html':
+            return local            # API 키를 쓰는 곳은 이 PC의 페이지만
+        return local or origin == 'null'   # file:// 로 연 편집기
+
+    def do_OPTIONS(self):
+        self.send_response(204 if self.path.startswith('/api/') else 405)
+        self.send_header('Content-Length', '0')
+        self.end_headers()
 
     def send_json(self, code, obj):
         body = json.dumps(obj, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
