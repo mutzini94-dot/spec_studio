@@ -1425,11 +1425,68 @@ function editField(el, fid) {
   el.addEventListener('keydown', key);
 }
 
+// 화면 설계 프레임의 Description 패널에서 바로 입력: 첫 줄 = 제목, 다음 줄부터 = 설명
+// 빈 행이면 새 Description(화면 위 번호 없이 패널에만)을 만들어 입력
+function editDescRow(row, fid) {
+  finishEdit();
+  let id = row.dataset.desc, isNew = false;
+  if (!id) {
+    const c = containerFor(fid);
+    if (!c || c.kind !== 'frame') return;
+    const num = O.nextDescriptionNumber(c);
+    const n = M.createNode('description', { x: 732, y: O.R(58 + (num - 1) * 22), num, marker: false, title: '', body: '' });
+    if (!commit([{ op: 'insert', parent: c.id, index: null, item: n }], 'Description 추가')) return;
+    flush();
+    id = n.id; isNew = true;
+    row = world().querySelector(`.fwrap[data-fw="${fid}"] .ch-desc-r[data-desc="${id}"]`);
+    if (!row) return;
+  }
+  const n = E.idx.get(id);
+  if (!n) return;
+  select([id]);
+  const t = row.querySelector('.ch-desc-t');
+  t.textContent = (n.title || '') + (n.body ? '\n' + n.body : '');
+  row.classList.add('editing');
+  try { t.contentEditable = 'plaintext-only'; } catch (err) { t.contentEditable = 'true'; }
+  if (t.contentEditable !== 'plaintext-only') t.contentEditable = 'true';
+  t.focus();
+  const rg = document.createRange(); rg.selectNodeContents(t); if (!isNew) rg.collapse(false);
+  const s = getSelection(); s.removeAllRanges(); s.addRange(rg);
+  let done = false;
+  const finish = (save) => {
+    if (done) return;
+    done = true;
+    t.removeEventListener('blur', onBlur); t.removeEventListener('keydown', onKey2);
+    t.contentEditable = 'false';
+    row.classList.remove('editing');
+    const lines = t.innerText.replace(/\r/g, '').replace(/\n+$/, '').split('\n');
+    const title = (lines[0] || '').trim(), body = lines.slice(1).join('\n').trim();
+    const cur = E.idx.get(id);
+    if (!cur) return;
+    if (save && isNew && !title && !body) { commit([{ op: 'remove', id }], '빈 Description 삭제'); return; }
+    const ops = [];
+    if (save && title !== (cur.title || '')) ops.push({ op: 'set', id, key: 'title', value: title });
+    if (save && body !== (cur.body || '')) ops.push({ op: 'set', id, key: 'body', value: body });
+    if (ops.length) commit(ops, 'Description 입력'); else scheduleRenderAll(fid);
+  };
+  const onBlur = () => finish(true);
+  const onKey2 = (ev) => {
+    ev.stopPropagation();
+    if (ev.key === 'Escape') { ev.preventDefault(); finish(!isNew ? false : true); t.blur(); }
+    else if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); t.blur(); }
+  };
+  t.addEventListener('blur', onBlur);
+  t.addEventListener('keydown', onKey2);
+  if (isNew) toast('첫 줄은 제목, Enter로 다음 줄부터 설명 · Ctrl+Enter 또는 바깥을 누르면 저장');
+}
+
 function onDbl(e) {
   if (E.view === 'sorter') return;
   const wrap = e.target.closest('.fwrap');
   if (!wrap) return;
   const fid = wrap.dataset.fw;
+  const drow = e.target.closest('.ch-desc-r');
+  if (drow && !e.target.closest('[data-id]')) { editDescRow(drow, fid); return; }
   const field = e.target.closest('.ch-field');
   if (field && !e.target.closest('[data-id]')) { editField(field, fid); return; }
   const hit = e.target.closest('[data-id]');

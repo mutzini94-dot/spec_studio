@@ -13,3 +13,10 @@
 /* 미리보기: 프로토타입은 그대로 보이고 눌러서 쓸 수 있게 */
 #present .n-hotspot.embed { border: 0; background: #fff; cursor: auto; }
 #present .n-hotspot.embed:hover { outline: none; background: #fff; }
+
+/* 화면 설계 Description 패널: 행을 더블클릭해서 바로 입력 (빈 행 = 새 Description) */
+.edit-mode .ch-desc-r { pointer-events: auto; cursor: default; }
+.edit-mode .ch-desc-r:hover { background: #e8eefc; }
+.edit-mode .ch-desc-r.ch-desc-empty:hover .ch-desc-t::after { content: "더블클릭해서 입력"; color: #8a94a6; font-size: 7px; }
+.ch-desc-r.editing { background: #fff; box-shadow: inset 0 0 0 1.5px #2f80ff; }
+.ch-desc-r.editing .ch-desc-t { outline: none; cursor: text; user-select: text; -webkit-user-select: text; min-height: 1.4em; }

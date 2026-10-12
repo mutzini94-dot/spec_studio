@@ -369,6 +369,21 @@ const ACT = {
 };
 let lastHl = '#ffeb3b', lastFc = '#e53935';
 
+// ---------- 미니 도구 막대(오른쪽 클릭) 등 다른 곳에서 같은 동작을 쓰기 위한 통로 ----------
+export function run(a, el) { if (ACT[a]) { try { ACT[a](el); } catch (err) { console.error(err); Ed.toast('실행하지 못했어요: ' + err.message, true); } } setTimeout(update, 30); }
+export function isTextTarget() { const t = target(); return t.mode === 'edit' || t.mode === 'cells' || t.ns.length > 0; }
+export function state() {
+  const t = target();
+  const has = t.mode === 'edit' || t.mode === 'cells' || t.ns.length > 0;
+  const n = t.mode === 'nodes' ? t.ns[0] : t.n;
+  return {
+    has, font: (n && n.style && n.style.font) || 'm', size: has ? curSize(t) : '', align: curStyle('align', 'left'),
+    b: has && charOn(t, 'b'), i: has && charOn(t, 'i'), u: has && charOn(t, 'u'),
+    hl: resolveColor(E.doc, lastHl), fc: resolveColor(E.doc, lastFc), cells: t.mode === 'cells',
+  };
+}
+export { setFont, setSize, I as ICONS, SIZES };
+
 // ---------- 그리기 (DOM) ----------
 const btn = (act, inner, title, cls = '') => `<button class="rb-b ${cls}" data-rb="${act}" title="${esc(title)}">${inner}</button>`;
 const big = (act, icon, label, title, arrowAct) => arrowAct

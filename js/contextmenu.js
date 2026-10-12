@@ -4,7 +4,8 @@ import * as O from './ops.js';
 import * as Ed from './editor.js';
 import * as P from './panels.js';
 import * as V from './viewtools.js';
-import { SHAPES, CAPS } from './render.js';
+import { SHAPES, CAPS, FONT_NAMES } from './render.js';
+import * as RB from './ribbon.js';
 import { LAYOUT_INFO } from './templates.js';
 import * as store from './store.js';
 
@@ -492,6 +493,82 @@ export function openItems(x, y, items, flipX) {
 }
 export { copySel, paste, forShape, rotateMenu };
 
+// ---------- 미니 서식 도구 막대 (PowerPoint처럼 오른쪽 클릭 메뉴 위에) ----------
+function wantsMini(ctx) {
+  if (ctx.kind !== 'node') return false;
+  const n = E.idx.get(ctx.id);
+  if (!n) return false;
+  if (!['text', 'shape', 'table'].includes(n.type) && !(n.type === 'instance' && ctx.mid)) return false;
+  return RB.isTextTarget();
+}
+function buildMini(ctx) {
+  const I = RB.ICONS;
+  const bar = document.createElement('div');
+  bar.className = 'mini-bar';
+  const b = (a, inner, title, cls = '') => `<button class="mb-b ${cls}" data-mb="${a}" title="${esc(title)}">${inner}</button>`;
+  bar.innerHTML = `<div class="mb-rows">
+      <div class="mb-row"><select class="mb-font" title="글꼴">${Object.entries(FONT_NAMES).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('')}</select><input class="mb-size" list="mb-sizes" title="글꼴 크기" autocomplete="off"><datalist id="mb-sizes">${RB.SIZES.map((s) => `<option value="${s}">`).join('')}</datalist>
+        ${b('grow', I.grow, '글꼴 크기 크게 (Ctrl+Shift+>)')}${b('shrink', I.shrink, '글꼴 크기 작게 (Ctrl+Shift+<)')}${b('out', I.out, '목록 수준 줄임')}${b('ind', I.ind, '목록 수준 늘림')}</div>
+      <div class="mb-row">${b('b', '<b>가</b>', '굵게 (Ctrl+B)')}${b('i', '<i style="font-family:serif">가</i>', '기울임꼴 (Ctrl+I)')}${b('u', '<u>가</u>', '밑줄 (Ctrl+U)')}
+        ${b('aL', I.aL, '왼쪽 맞춤')}${b('aC', I.aC, '가운데 맞춤')}${b('aR', I.aR, '오른쪽 맞춤')}
+        <span class="mb-split">${b('hl', '<span class="mb-a">가</span><i class="mb-bar mb-hl"></i>', '텍스트 강조 색 (형광펜)')}${b('hlMenu', '▾', '형광펜 색 고르기', 'arr')}</span>
+        <span class="mb-split">${b('fc', '<span class="mb-a">가</span><i class="mb-bar mb-fc"></i>', '글꼴 색')}${b('fcMenu', '▾', '글꼴 색 고르기', 'arr')}</span>
+        ${b('painter', I.brush, '서식 복사 (Ctrl+Shift+C)')}</div>
+    </div>
+    ${b('memo', '<svg width="22" height="22" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"><path d="M2 3h12v8H7l-3 3v-3H2z"/><path d="M8 5v4M6 7h4"/></svg><span>새 메모</span>', '이 객체에 대한 메모를 프레임 메모에 추가', 'mb-big')}`;
+  const font = bar.querySelector('.mb-font'), size = bar.querySelector('.mb-size');
+  const refresh = () => {
+    const s = RB.state();
+    if (document.activeElement !== font) font.value = s.font;
+    if (document.activeElement !== size) size.value = s.size;
+    font.disabled = s.cells;
+    for (const k of ['b', 'i', 'u']) bar.querySelector(`[data-mb="${k}"]`).classList.toggle('on', !!s[k]);
+    bar.querySelector('[data-mb="aL"]').classList.toggle('on', s.align === 'left');
+    bar.querySelector('[data-mb="aC"]').classList.toggle('on', s.align === 'center');
+    bar.querySelector('[data-mb="aR"]').classList.toggle('on', s.align === 'right');
+    bar.querySelector('.mb-hl').style.background = s.hl;
+    bar.querySelector('.mb-fc').style.background = s.fc;
+  };
+  bar.addEventListener('pointerdown', (ev) => { if (ev.target.closest('button')) ev.preventDefault(); });
+  bar.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('[data-mb]');
+    if (!btn) return;
+    const a = btn.dataset.mb;
+    if (a === 'memo') { close(); addMemo(ctx); return; }
+    if (a === 'painter') { close(); RB.run('painter'); return; }
+    // 색 고르기 창은 메뉴 밖에 뜨므로 메뉴는 닫고 창만 남긴다
+    if (a === 'hlMenu' || a === 'fcMenu') { const r = btn.getBoundingClientRect(); const anchor = Object.assign(document.createElement('div'), { style: `position:fixed;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px` }); document.body.appendChild(anchor); close(); RB.run(a, anchor); setTimeout(() => anchor.remove(), 0); return; }
+    RB.run(a, btn);
+    setTimeout(refresh, 60);
+  });
+  font.addEventListener('change', () => { RB.setFont(font.value); setTimeout(refresh, 60); });
+  const applySize = () => { if (size.value !== '') { RB.setSize(parseFloat(size.value)); setTimeout(refresh, 60); } };
+  size.addEventListener('change', applySize);
+  size.addEventListener('keydown', (ev) => { ev.stopPropagation(); if (ev.key === 'Enter') applySize(); if (ev.key === 'Escape') close(); });
+  refresh();
+  return bar;
+}
+// 새 메모: 3단계 댓글 전까지는 프레임 메모에 "• 객체 이름: " 줄을 더하고 그 자리에 커서
+function addMemo(ctx) {
+  const n = E.idx.get(ctx.id);
+  const fid = Ed.frameOfNode(ctx.id);
+  const f = fid && E.idx.get(fid);
+  if (!f || f.kind !== 'frame') { Ed.toast('프레임 안의 객체에만 메모를 달 수 있어요.'); return; }
+  const line = `• ${n.name || '객체'}: `;
+  const notes = (f.notes ? f.notes.replace(/\s+$/, '') + '\n' : '') + line;
+  Ed.commit([{ op: 'set', id: fid, key: 'notes', value: notes }], '새 메모');
+  Ed.flush();
+  setTimeout(() => {
+    const nb = document.getElementById('notes-bar');
+    if (!nb) return;
+    nb.classList.add('open');
+    V.renderNotes(E);
+    const ta = nb.querySelector('textarea');
+    ta.value = notes; ta.dataset.fid = fid;
+    ta.focus(); ta.setSelectionRange(notes.length, notes.length);
+  }, 40);
+}
+
 export function open(e, ctx) {
   close();
   const items = itemsFor(ctx);
@@ -502,6 +579,22 @@ export function open(e, ctx) {
   const m = build(items, 0);
   root.appendChild(m);
   place(m, e.clientX, e.clientY);
+  if (wantsMini(ctx)) {
+    const bar = buildMini(ctx);
+    root.appendChild(bar);
+    const bh = bar.offsetHeight, bw = bar.offsetWidth;
+    // 막대는 메뉴 바로 위에 (메뉴가 화면 아래에 걸려 위로 밀려도 겹치지 않게)
+    const mr = m.getBoundingClientRect();
+    const top = Math.min(e.clientY, mr.top);
+    let bx = e.clientX - 10, by = top - bh - 8;
+    if (by < 6) {
+      // 위 공간이 모자라면: 메뉴를 막대 아래로 내릴 수 있으면 내리고, 아니면 메뉴 옆에
+      if (e.clientY + 4 + bh + 6 + mr.height <= innerHeight - 6) { by = e.clientY + 4; place(m, e.clientX, by + bh + 6); }
+      else { by = Math.max(6, mr.top); bx = mr.right + 6 + bw <= innerWidth - 6 ? mr.right + 6 : mr.left - bw - 6; }
+    }
+    bar.style.left = Math.max(6, Math.min(innerWidth - bw - 6, bx)) + 'px';
+    bar.style.top = by + 'px';
+  }
   setTimeout(() => {
     document.addEventListener('pointerdown', outside, true);
     window.addEventListener('keydown', onKey, true);

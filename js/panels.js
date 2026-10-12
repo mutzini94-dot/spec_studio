@@ -45,7 +45,7 @@ export function init(e) {
       home: () => home(E), open: () => Ed.openFromFile(), save: () => Ed.saveToFile(false), saveas: () => Ed.saveToFile(true),
       json: () => store.download(store.verifiedJSON(E.doc), store.fileName(E.doc)), import: () => importHelp(), importfile: () => pickImport(),
       undo: () => Ed.undo(), redo: () => Ed.redo(), present: () => present('first'), shortcuts: () => shortcuts(),
-      check: () => checkDoc(), print: () => printDoc(), find: () => findDialog(false), replace: () => findDialog(true),
+      check: () => checkDoc(), print: () => printDoc(), docinfo: () => docInfoDialog(), find: () => findDialog(false), replace: () => findDialog(true),
       sorter: () => Ed.setView(E.view === 'sorter' ? 'canvas' : 'sorter'),
       gridsize: () => { const v = prompt('격자 간격 (px)', E.doc.settings.grid || 10); if (v && +v > 1) Ed.setSetting('grid', +v); },
       clearguides: () => E.activeFrame && V.clearGuides(E, E.activeFrame),
@@ -587,12 +587,20 @@ export function renderRight() {
   }
 }
 
-function docInspector(box) {
+// 문서 정보 (파일 → 문서 정보…): 표지 · 머리말 · 꼬리말에 자동 반영
+export function docInfoDialog() {
   const m = E.doc.meta;
-  const s = section('문서 정보', '표지 · 머리말에 자동 반영');
+  const bg = modal(`<header><h2>문서 정보</h2><p>표지 · 머리말(Project) · 꼬리말(저작권)에 자동으로 들어가요. 표지의 제목 · 팀 · 버전 · 날짜는 캔버스에서 더블클릭해도 고칠 수 있어요.</p></header><div class="body"><div class="insp doc-info"></div>
+    <div class="actions" style="margin-top:16px"><button class="ib primary" id="di-close">닫기</button></div></div>`);
+  const s = bg.querySelector('.doc-info');
   const f = (lab, key, ph) => s.appendChild(row(lab, textField(m[key], ['doc'], 'meta.' + key, { ph, label: '문서 정보' })));
   f('제목', 'title'); f('프로젝트', 'project'); f('팀', 'team'); f('버전', 'version'); f('날짜', 'date', 'YYYY-MM-DD'); f('작성자', 'author'); f('저작권', 'copyright');
-  box.appendChild(s);
+  bg.querySelector('#di-close').onclick = () => { if (document.activeElement && bg.contains(document.activeElement)) document.activeElement.blur(); closeModal(); };
+  setTimeout(() => { const i = s.querySelector('input'); if (i) i.focus(); }, 30);
+}
+
+function docInspector(box) {
+  const m = E.doc.meta;
   // 머리글 · 바닥글
   const ft = Object.assign({ slogan: true, copyright: true, pageNo: true }, m.footer || {});
   const fs = section('바닥글', '모든 프레임');
