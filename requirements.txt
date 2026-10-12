@@ -1,0 +1,3 @@
+# Vercel 함수(api/*.py)용: PDF 가져오기. PPTX 변환은 표준 라이브러리만 쓴다.
+pymupdf>=1.26,<2
+pillow>=11

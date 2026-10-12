@@ -1080,7 +1080,7 @@ let aiState = null;
 function checkAI() {
   if (aiState) return;
   aiState = { pending: true };
-  API.findServer().then((s) => { aiState = s ? { ai: !!s.info.ai, model: s.info.model, server: true } : { ai: false, server: false }; }).finally(() => renderRight());
+  API.findServer(false, true).then((s) => { aiState = s ? { ai: !!s.info.ai, model: s.info.model, server: true } : { ai: false, server: false }; }).finally(() => renderRight());
 }
 function autoSection(s, n, a) {
   checkAI();
@@ -1376,7 +1376,11 @@ export async function importFile(file) {
   const bg = modal(`<header><h2>가져오는 중…</h2><p>${esc(file.name)} · ${mb}MB</p></header>
     <div class="body"><div class="imp-progress"><i></i></div><div class="muted" style="margin-top:10px">도형 · 글 · 표 · 그림을 편집 가능한 요소로 바꾸고 있어요. ${/\.pdf$/i.test(file.name) ? 'PDF는 쪽마다 2~3초 걸려요 (20쪽이면 1분쯤).' : '큰 파일은 몇 초 걸릴 수 있어요.'}</div></div>`, false);
   // 같은 주소에 변환 API가 없으면(파일로 열기 · 정적 서버) 이 PC에 켜진 Spec Studio 서버를 찾아서 보낸다
-  const r = await API.call('/api/import', { method: 'POST', headers: { 'X-Filename': encodeURIComponent(file.name), 'Content-Type': 'application/octet-stream' }, body: file });
+  const srv = await API.findServer();
+  // 배포된 사이트의 변환 함수(Vercel)는 요청 크기 · 시간 제한이 있어 PDF를 쪽 묶음으로 나눠 보낸다
+  const r = !srv ? { offline: true }
+    : /\.pdf$/i.test(file.name) && !srv.info.local ? await importInParts(file, bg)
+    : await API.call('/api/import', { method: 'POST', headers: { 'X-Filename': encodeURIComponent(file.name), 'Content-Type': 'application/octet-stream' }, body: file });
   const res = r.res, body = r.body;
   if (r.offline || !res || res.status === 404 || res.status === 405 || (!body && !res.ok)) {
     noServer(bg, file);
@@ -1410,6 +1414,57 @@ export async function importFile(file) {
   bg.querySelector('[data-x="json"]').onclick = () => store.download(store.verifiedJSON(doc), file.name.replace(/\.(pptx|pdf)$/i, '') + '.tnspec.json');
   bg.querySelector('[data-x="more"]').onclick = () => pickImport();
 }
+// 큰 PDF → 쪽 묶음(최대 6쪽 · 3.5MB)으로 나눠 차례로 변환하고 한 문서로 합친다
+const PART_PAGES = 6, PART_BYTES = 3.5 * 1024 * 1024;
+async function importInParts(file, bg) {
+  const status = (t) => { const m = bg.querySelector('.modal .body .muted'); if (m) m.textContent = t; };
+  let PDFDocument;
+  try { ({ PDFDocument } = await import('https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/+esm')); }
+  catch (e) { return { res: { ok: false, status: 500, statusText: 'PDF 나누기 도구(pdf-lib)를 불러오지 못했어요. 인터넷 연결을 확인하세요.' }, body: null }; }
+  let src;
+  try { src = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true }); }
+  catch (e) { return { res: { ok: false, status: 400, statusText: 'PDF를 열 수 없어요: ' + e.message }, body: {} }; }
+  const total = src.getPageCount();
+  const slice = async (from, to) => {
+    const out = await PDFDocument.create();
+    (await out.copyPages(src, Array.from({ length: to - from }, (_, i) => from + i))).forEach((p) => out.addPage(p));
+    return out.save();
+  };
+  let merged = null, report = [], from = 0, index = 0;
+  while (from < total) {
+    let to = Math.min(total, from + PART_PAGES), bytes = await slice(from, to);
+    while (bytes.length > PART_BYTES && to - from > 1) { to = from + Math.max(1, Math.floor((to - from) / 2)); bytes = await slice(from, to); }
+    status(`${total}쪽 중 ${from + 1}~${to}쪽 변환 중… (${index + 1}번째 묶음)`);
+    const frames = merged ? merged.pages.flatMap((p) => p.frames) : [];
+    const part = { index, offset: from, total, dividers: frames.filter((f) => f.layout === 'divider').length,
+      screens: frames.filter((f) => f.nodes.length === 1 && /^화면 이미지/.test(f.nodes[0].name || '')).length };
+    const r = await API.call('/api/import', { method: 'POST', body: new Blob([bytes], { type: 'application/pdf' }),
+      headers: { 'X-Filename': encodeURIComponent(file.name), 'X-Part': JSON.stringify(part), 'Content-Type': 'application/octet-stream' } });
+    if (r.offline || !r.res || !r.res.ok || !r.body || !r.body.doc) {
+      if (r.res && r.body && r.body.error) r.body.error = `${from + 1}~${to}쪽: ` + r.body.error;
+      if (r.res && r.res.status === 413) return { res: { ok: false, status: 413, statusText: `${from + 1}쪽이 너무 커서(4.5MB 넘음) 배포된 사이트에서는 바꿀 수 없어요. "Spec Studio 실행.bat"으로 이 PC에서 열어 주세요.` }, body: null };
+      return r;
+    }
+    merged = mergePart(merged, r.body.doc);
+    report = report.concat(r.body.report || []);
+    from = to; index++;
+  }
+  return { res: { ok: true, status: 200 }, body: { doc: merged, report } };
+}
+function mergePart(merged, d) {
+  if (!merged) return d;
+  Object.assign(merged.assets, d.assets);
+  let pages = d.pages;
+  // 묶음 첫 쪽이 간지가 아니면 앞 묶음 마지막 페이지에 이어 붙인다
+  if (pages.length && merged.pages.length && !(pages[0].frames[0] && pages[0].frames[0].layout === 'divider')) {
+    merged.pages[merged.pages.length - 1].frames.push(...pages[0].frames);
+    pages = pages.slice(1);
+  }
+  merged.pages.push(...pages);
+  for (const k of Object.keys(d.meta || {})) if (!merged.meta[k] && d.meta[k]) merged.meta[k] = d.meta[k];
+  return merged;
+}
+
 function noServer(bg, file) {
   const pdf = /\.pdf$/i.test(file.name);
   bg.querySelector('.modal').innerHTML = `<header><h2>변환 서버를 기다리는 중…</h2><p>${esc(file.name)}을(를) 바꿀 Spec Studio 서버가 이 PC에서 켜져 있지 않아요. 서버가 켜지면 <b>자동으로 이어서 변환</b>해요.</p></header>

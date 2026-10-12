@@ -14,22 +14,16 @@ python -m http.server 와 같은 방식으로 저장소 루트를 서비스하�
   환경 변수 ANTHROPIC_API_KEY  또는  tools/ai.key 파일(한 줄, 저장소에 올라가지 않음)
   모델은 SPEC_STUDIO_MODEL 로 바꿀 수 있다 (기본 claude-opus-5-5).
 """
-import argparse, http.server, json, os, re, sys, tempfile, threading, traceback
+import argparse, http.server, json, os, re, sys, traceback
 import urllib.error, urllib.request
-from urllib.parse import unquote
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-MAX_BYTES = 200 * 1024 * 1024
-LOCK = threading.Lock()   # 변환기는 모듈 전역 상태를 써서 한 번에 하나씩
+import importapi  # noqa: E402
+from importapi import pdf_available  # noqa: E402
 
-
-def pdf_available():
-    try:
-        import pymupdf  # noqa: F401
-        return True
-    except Exception:
-        return False
+# 배포된 Spec Studio(정적 사이트)에서도 이 PC의 서버를 쓸 수 있게 허용하는 주소. SPEC_STUDIO_ORIGINS 로 더할 수 있다 (쉼표 구분)
+TRUSTED = ['https://specstudio.vercel.app'] + [o.strip() for o in os.environ.get('SPEC_STUDIO_ORIGINS', '').split(',') if o.strip()]
 
 
 def api_key():
@@ -125,22 +119,28 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.send_header('Cache-Control', 'no-store')
         # 다른 주소로 연 편집기(파일로 열기 · 다른 포트의 정적 서버)도 이 서버의 변환 API를 쓸 수 있게
         origin = self.headers.get('Origin')
+        if origin and self.path.startswith('/api/') and not self.cors_ok(origin):
+            print('[cors] 허용하지 않은 출처: %s → %s' % (origin, self.path), flush=True)
         if origin and self.path.startswith('/api/') and self.cors_ok(origin):
             self.send_header('Access-Control-Allow-Origin', origin)
-            self.send_header('Access-Control-Allow-Headers', 'Content-Type, X-Filename')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type, X-Filename, X-Part')
             self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
             self.send_header('Vary', 'Origin')
         super().end_headers()
 
     def cors_ok(self, origin):
         local = re.fullmatch(r'https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?', origin) is not None
+        trusted = origin in TRUSTED or re.fullmatch(r'https://specstudio(-[a-z0-9-]+)?\.vercel\.app', origin) is not None
         if self.path.split('?')[0] == '/api/screen2html':
-            return local            # API 키를 쓰는 곳은 이 PC의 페이지만
-        return local or origin == 'null'   # file:// 로 연 편집기
+            return local or trusted   # API 키를 쓰는 곳은 이 PC의 페이지와 배포된 Spec Studio 만
+        return local or trusted or origin == 'null'   # null = file:// 로 연 편집기
 
     def do_OPTIONS(self):
         self.send_response(204 if self.path.startswith('/api/') else 405)
         self.send_header('Content-Length', '0')
+        # 공개 사이트(https) → 이 PC(127.0.0.1) 요청은 Chrome이 먼저 이 허락을 묻는다 (Private Network Access)
+        if self.headers.get('Access-Control-Request-Private-Network') == 'true' and self.cors_ok(self.headers.get('Origin') or ''):
+            self.send_header('Access-Control-Allow-Private-Network', 'true')
         self.end_headers()
 
     def send_json(self, code, obj):
@@ -153,7 +153,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.split('?')[0] == '/api/ping':
-            self.send_json(200, {'ok': True, 'pptx': True, 'pdf': pdf_available(), 'ai': bool(api_key()), 'model': MODEL})
+            self.send_json(200, {'ok': True, 'local': True, 'pptx': True, 'pdf': pdf_available(), 'ai': bool(api_key()), 'model': MODEL})
             return
         super().do_GET()
 
@@ -190,42 +190,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             length = int(self.headers.get('Content-Length') or 0)
         except ValueError:
             length = 0
-        if length <= 0:
-            self.send_json(400, {'error': '파일이 비어 있습니다'})
-            return
-        if length > MAX_BYTES:
+        if length > importapi.MAX_BYTES:
             self.send_json(413, {'error': '파일이 너무 큽니다 (최대 200MB)'})
             return
-        name = os.path.basename(unquote(self.headers.get('X-Filename') or 'upload.pptx'))
-        name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', '_', name) or 'upload.pptx'
-        ext = os.path.splitext(name)[1].lower()
-        if ext not in ('.pptx', '.pdf'):
-            self.send_json(415, {'error': 'PPTX 또는 PDF 파일만 가져올 수 있습니다 (.ppt 는 PowerPoint에서 .pptx로 저장해 주세요)'})
-            return
-        data = self.rfile.read(length)
-        try:
-            with LOCK, tempfile.TemporaryDirectory() as d:
-                src = os.path.join(d, name)
-                out = os.path.join(d, 'out.tnspec.json')
-                with open(src, 'wb') as f:
-                    f.write(data)
-                if ext == '.pptx':
-                    import pptx2json
-                    doc, report = pptx2json.convert(src, out)
-                else:
-                    if not pdf_available():
-                        self.send_json(501, {'error': 'PDF 가져오기에는 PyMuPDF가 필요합니다 (pip install pymupdf pillow). PPTX는 바로 됩니다.'})
-                        return
-                    import pdf2json
-                    doc, report = pdf2json.convert(src, out)
-            self.send_json(200, {'doc': doc, 'report': report})
-            print('[import] %s → 프레임 %d' % (name, sum(len(p['frames']) for p in doc['pages'])), flush=True)
-        except Exception as e:
-            traceback.print_exc()
-            msg = str(e)
-            if isinstance(e, __import__('zipfile').BadZipFile):
-                msg = 'PPTX 파일을 열 수 없습니다 (손상되었거나 암호가 걸린 파일일 수 있어요)'
-            self.send_json(500, {'error': '변환 실패: ' + msg})
+        data = self.rfile.read(length) if length > 0 else b''
+        code, obj = importapi.run(self.headers.get('X-Filename'), data, {'X-Part': self.headers.get('X-Part')})
+        self.send_json(code, obj)
 
 
 def main():

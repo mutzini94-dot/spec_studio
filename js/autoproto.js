@@ -103,12 +103,13 @@ export async function generate(id, request) {
   const r = await API.call('/api/screen2html', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ image: shot.data, w: a.cw, h: a.ch, frame: f ? f.name : '', descriptions: descs, request: request || a.request || '' }),
-  });
+  }, true);   // AI 자동 구현은 이 PC의 Spec Studio 서버(API 키)에서만
   if (r.offline) why = 'Spec Studio 서버(tools/serve.py)에 연결할 수 없어 기본 프로토타입으로 만들었어요.';
   else {
     const res = r.res, j = r.body || {};
     if (res.ok && j.html) { html = j.html; gen = { by: 'ai', model: j.model, at: new Date().toISOString() }; if (j.truncated) why = '응답이 길어 일부가 잘렸을 수 있어요. 다시 만들어 보세요.'; }
     else if (res.status === 501) why = 'AI 키가 없어 기본 프로토타입으로 만들었어요. ' + (j.message || '');
+    else if (res.status === 404 || res.status === 405) why = 'AI 자동 구현은 이 PC에서 Spec Studio 서버("Spec Studio 실행.bat")를 켰을 때만 돼요 — 기본 프로토타입으로 만들었어요.';
     else why = (j.error || ('서버 오류 ' + res.status)) + ' — 기본 프로토타입으로 만들었어요.';
   }
   if (!html) { html = basicHTML(shot.data, a.cw, a.ch, descs); gen = { by: 'basic', at: new Date().toISOString() }; }

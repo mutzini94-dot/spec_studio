@@ -364,13 +364,18 @@ def title_from_name(src):
     return base.replace('_', ' ').strip(), ver
 
 
-def convert(src, out_path, title=None, dividers=None):
+def convert(src, out_path, title=None, dividers=None, part=None):
+    """part: 큰 PDF를 쪽 묶음으로 나눠 보낼 때 이 묶음의 위치
+       {'index': 묶음 번호, 'offset': 앞 묶음까지의 쪽 수, 'total': 전체 쪽 수, 'dividers': 앞까지 나온 간지 수, 'screens': 앞까지 나온 화면 캡처 수}
+       (Vercel 함수는 요청 본문이 4.5MB로 제한돼 브라우저가 나눠 보낸다 — js/panels.js importFile)"""
+    part = part or {}
     doc = pymupdf.open(src)          # 배경용 (글자 · 주석 · 이미지를 단계적으로 지움)
     pristine = pymupdf.open(src)     # 표 · 메타 추출용 (원본 그대로)
-    seed = hashlib.sha1(os.path.basename(src).encode('utf-8')).hexdigest()[:4]
+    seed = hashlib.sha1((os.path.basename(src) + ':%d' % part.get('index', 0)).encode('utf-8')).hexdigest()[:4]
     ids = Ids(seed)
     assets = Assets(ids)
     total = len(doc)
+    offset, gtotal = part.get('offset', 0), part.get('total') or len(doc)
     fname_title, fname_ver = title_from_name(src)
     dividers = list(dividers or [])
     warnings = []
@@ -386,10 +391,11 @@ def convert(src, out_path, title=None, dividers=None):
 
     for pno in range(total):
         page, orig = doc[pno], pristine[pno]
+        gp = offset + pno   # 문서 전체에서의 쪽 번호
         s = W / orig.rect.width
         lines = lines_of(orig)
         is_img = image_page(orig, lines)
-        layout = 'blank' if is_img else detect(orig, pno, total, lines)
+        layout = 'blank' if is_img else detect(orig, gp, gtotal, lines)
         frame = {'kind': 'frame', 'id': ids('fr'), 'name': '', 'layout': layout, 'props': {}, 'nodes': []}
         big = sorted(lines, key=lambda l: -l['size'])
 
@@ -405,13 +411,13 @@ def convert(src, out_path, title=None, dividers=None):
                     meta['team'] = l['text']
             frame['name'] = '표지'
         elif layout == 'divider':
-            nth = sum(1 for p in pages for f in p['frames'] if f['layout'] == 'divider')
+            nth = part.get('dividers', 0) + sum(1 for p in pages for f in p['frames'] if f['layout'] == 'divider')
             num = next((l['text'] for l in big if re.fullmatch(r'\d{1,2}', l['text'])), '%02d' % (nth + 1))
             ttl = next((l['text'] for l in big if l['text'] != num and len(l['text']) < 40 and 'CREATIVE' not in l['text'].upper()), None)
             if nth < len(dividers): ttl = dividers[nth]
             if not ttl:
                 ttl = '장 제목'
-                warnings.append('%d쪽 간지 제목을 읽을 수 없음(이미지) — --dividers 로 지정하거나 편집기에서 더블클릭해 입력' % (pno + 1))
+                warnings.append('%d쪽 간지 제목을 읽을 수 없음(이미지) — --dividers 로 지정하거나 편집기에서 더블클릭해 입력' % (gp + 1))
             frame['props'] = {'number': num, 'title': ttl}
             frame['name'] = ttl
         elif layout == 'end':
@@ -425,11 +431,11 @@ def convert(src, out_path, title=None, dividers=None):
                 # 화면 캡처 페이지: 흰 여백을 잘라낸 화면 이미지 한 장 (잠그지 않음 → 바로 화면 프로토타입으로 바꿀 수 있게)
                 crop, (x0, y0, x1, y1) = trim_white(render(orig, BG_SCALE))
                 k = s / BG_SCALE
-                aid = assets.add(crop, 'WEBP', 90, 'PDF %d쪽 화면' % (pno + 1))
-                nth = sum(1 for p in pages for f in p['frames'] if f.get('_img')) + 1
+                aid = assets.add(crop, 'WEBP', 90, 'PDF %d쪽 화면' % (gp + 1))
+                nth = part.get('screens', 0) + sum(1 for p in pages for f in p['frames'] if f.get('_img')) + 1
                 frame['name'] = '화면 %d' % nth
                 frame['_img'] = True
-                frame['nodes'] = [{'id': ids('ima'), 'type': 'image', 'name': '화면 이미지 (PDF %d쪽)' % (pno + 1), 'x': R(x0 * k), 'y': R(y0 * k),
+                frame['nodes'] = [{'id': ids('ima'), 'type': 'image', 'name': '화면 이미지 (PDF %d쪽)' % (gp + 1), 'x': R(x0 * k), 'y': R(y0 * k),
                                    'w': R((x1 - x0) * k), 'h': R((y1 - y0) * k), 'asset': aid, 'fit': 'fill'}]
             elif layout in AREAS:
                 area, tbox = AREAS[layout]
@@ -448,7 +454,7 @@ def convert(src, out_path, title=None, dividers=None):
                     if pn: frame['props']['pageName'] = pn[0]
                     if pj and not meta['project']: meta['project'] = pj[0]
                     if st: frame['props']['screenTitle'] = st[0]
-                    frame['name'] = frame['props'].get('pageName') or (st[0] if st else '화면 %d' % (pno + 1))
+                    frame['name'] = frame['props'].get('pageName') or (st[0] if st else '화면 %d' % (gp + 1))
                     # Description 패널에 적힌 글 → Description 노드 (번호 위치는 사용자가 옮겨 붙임)
                     overlays = overlay_rects(orig, s)
                     overlay_keep += overlays
@@ -484,7 +490,7 @@ def convert(src, out_path, title=None, dividers=None):
                 elif layout == 'history':
                     frame['name'] = 'Revision History'
                 else:
-                    frame['name'] = (big[0]['text'][:30] if big else '페이지 %d' % (pno + 1))
+                    frame['name'] = (big[0]['text'][:30] if big else '페이지 %d' % (gp + 1))
 
                 # 표 (원본에서)
                 spans = tables.spans_of(orig)
@@ -614,20 +620,20 @@ def convert(src, out_path, title=None, dividers=None):
                 g = bg.convert('L')
                 ink = sum(g.histogram()[:245]) / (g.width * g.height)
                 if ink > .0008:
-                    aid = assets.add(bg, 'WEBP', 84, 'PDF %d쪽 배경' % (pno + 1))
-                    nodes.insert(0, ('z0', {'id': ids('ima'), 'type': 'image', 'name': '배경(PDF %d쪽)' % (pno + 1), 'x': 0, 'y': 0, 'w': W, 'h': H, 'asset': aid, 'fit': 'fill', 'locked': True, 'blend': 'multiply'}))
+                    aid = assets.add(bg, 'WEBP', 84, 'PDF %d쪽 배경' % (gp + 1))
+                    nodes.insert(0, ('z0', {'id': ids('ima'), 'type': 'image', 'name': '배경(PDF %d쪽)' % (gp + 1), 'x': 0, 'y': 0, 'w': W, 'h': H, 'asset': aid, 'fit': 'fill', 'locked': True, 'blend': 'multiply'}))
                 nodes.sort(key=lambda t: t[0])   # 겹침 순서: 배경 → 이미지 → 표 → 글 → 주석
                 frame['nodes'] = [n for _, n in nodes]
         except Exception as e:
             # 한 쪽이 실패해도 문서 전체는 가져온다: 그 쪽은 페이지 그림 한 장으로
-            print('[pdf2json] %d쪽 변환 실패 → 페이지 그림으로: %r' % (pno + 1, e), file=sys.stderr)
+            print('[pdf2json] %d쪽 변환 실패 → 페이지 그림으로: %r' % (gp + 1, e), file=sys.stderr)
             frame['layout'], frame['props'] = 'blank', {}
-            frame['name'] = frame['name'] or '페이지 %d' % (pno + 1)
-            aid = assets.add(render(orig, BG_SCALE), 'WEBP', 86, 'PDF %d쪽' % (pno + 1))
-            frame['nodes'] = [{'id': ids('ima'), 'type': 'image', 'name': 'PDF %d쪽 (그림)' % (pno + 1), 'x': 0, 'y': 0, 'w': W, 'h': H, 'asset': aid, 'fit': 'fill'}]
-            warnings.append('%d쪽은 자동 변환에 실패해 페이지 그림으로 넣었어요 (%s)' % (pno + 1, type(e).__name__))
+            frame['name'] = frame['name'] or '페이지 %d' % (gp + 1)
+            aid = assets.add(render(orig, BG_SCALE), 'WEBP', 86, 'PDF %d쪽' % (gp + 1))
+            frame['nodes'] = [{'id': ids('ima'), 'type': 'image', 'name': 'PDF %d쪽 (그림)' % (gp + 1), 'x': 0, 'y': 0, 'w': W, 'h': H, 'asset': aid, 'fit': 'fill'}]
+            warnings.append('%d쪽은 자동 변환에 실패해 페이지 그림으로 넣었어요 (%s)' % (gp + 1, type(e).__name__))
         cur['frames'].append(frame)
-        report.append('%2d쪽 %-8s %-24s 노드 %d' % (pno + 1, 'image' if is_img else layout, frame['name'][:24], len(frame['nodes'])))
+        report.append('%2d쪽 %-8s %-24s 노드 %d' % (gp + 1, 'image' if is_img else layout, frame['name'][:24], len(frame['nodes'])))
         if is_img and not any('화면 캡처' in w for w in warnings):
             warnings.append('글자 없는 화면 캡처 페이지는 화면 이미지로 가져왔어요 — 이미지를 오른쪽 클릭 → "이 이미지로 화면 프로토타입 만들기"로 바로 자동 구현할 수 있어요')
 
