@@ -160,6 +160,21 @@ def trim_white(im, pad=4):
     return im.crop((x0, y0, x1, y1)), (x0, y0, x1, y1)
 
 
+def ring_color(im, box, gap=3):
+    """번호 원을 지운 자리를 채울 색: 원 바로 바깥 둘레의 가운데값 (파란 버튼 위 번호면 파랑 — 흰 구멍이 안 남게)"""
+    import math
+    cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+    r = max(box[2] - box[0], box[3] - box[1]) / 2 + gap
+    px = []
+    for k in range(36):
+        x, y = int(cx + r * math.cos(k * math.pi / 18)), int(cy + r * math.sin(k * math.pi / 18))
+        if 0 <= x < im.width and 0 <= y < im.height:
+            px.append(im.getpixel((x, y))[:3])
+    if not px:
+        return (255, 255, 255)
+    return tuple(sorted(p[c] for p in px)[len(px) // 2] for c in range(3))
+
+
 NUM_RE = re.compile(r'\d{1,2}(?:-\d{1,2})?')
 
 
@@ -607,8 +622,8 @@ def convert(src, out_path, title=None, dividers=None, part=None):
                 dr = ImageDraw.Draw(bg)
                 circles = set(range(n_avoid, n_avoid + len(marker_rects)))
                 for i, (x0, y0, x1, y1) in enumerate([tuple(a) for a in avoid]):
-                    box = [x0 / s * BG_SCALE, y0 / s * BG_SCALE, x1 / s * BG_SCALE, y1 / s * BG_SCALE]
-                    if i in circles: dr.ellipse(box, fill=(255, 255, 255))
+                    box = [x0 * BG_SCALE, y0 * BG_SCALE, x1 * BG_SCALE, y1 * BG_SCALE]   # avoid 는 PDF 좌표
+                    if i in circles: dr.ellipse([box[0] - 1, box[1] - 1, box[2] + 1, box[3] + 1], fill=ring_color(bg, box))
                     else: dr.rectangle(box, fill=(255, 255, 255))
                 for x0, y0, x1, y1 in chrome_boxes(layout):
                     dr.rectangle([x0 / s * BG_SCALE, y0 / s * BG_SCALE, x1 / s * BG_SCALE, y1 / s * BG_SCALE], fill=(255, 255, 255))

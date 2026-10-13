@@ -82,6 +82,12 @@ def screen2html(req):
             lines.append('   ' + d['body'].strip().replace('\n', '\n   '))
     if not descs:
         lines.append('(없음 — 스크린샷만 보고 자연스러운 동작을 구현)')
+    texts = req.get('texts') or []
+    if texts:
+        # 기획서 영역에서 캡처한 경우: 화면 글자를 정확한 표기로 함께 준다 (스크린샷을 읽어 옮기다 틀리지 않게)
+        lines += ['', '화면 글자 (기획서 원문 · 이 표기 그대로 쓸 것, 좌표는 왼쪽 위 기준):']
+        for t in texts[:120]:
+            lines.append('- (%s, %s) %s' % (t.get('x'), t.get('y'), str(t.get('t', '')).replace('\n', ' / ')[:300]))
     if (req.get('request') or '').strip():
         lines += ['', '추가 요청: ' + req['request'].strip()]
     body = {

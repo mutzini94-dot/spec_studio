@@ -1091,6 +1091,7 @@ function autoSection(s, n, a) {
   if (!shot) {
     const b = el('<div class="btns"></div>');
     b.appendChild(btn('📷 화면 스크린샷 올리기', '올리면 바로 동작하는 프로토타입으로 자동 구현돼요', () => AP.pickScreenshot(n.id), 'primary wide'));
+    b.appendChild(btn('📐 아래 기획서 화면으로 자동 구현', '이 영역 아래에 그려진 기획서 화면을 그대로 캡처해서 구현해요', () => AP.captureUnder(n.id), 'wide'));
     box.appendChild(b);
     box.appendChild(el('<div class="muted">이미지를 영역 위에 끌어다 놓거나, 영역을 고른 채 Ctrl+V로 붙여 넣어도 돼요.</div>'));
   } else {
@@ -1104,7 +1105,8 @@ function autoSection(s, n, a) {
     const go = btn(busy ? '⏳ 만드는 중…' : g ? '✨ 다시 자동 구현' : '✨ 자동 구현', '스크린샷과 이 화면의 Description을 보고 동작하는 HTML을 만들어요', () => AP.generate(n.id, req.value.trim()), 'primary wide');
     if (busy) go.disabled = true;
     b.appendChild(go);
-    b.appendChild(btn('스크린샷 바꾸기', '새 스크린샷으로 다시 구현', () => AP.pickScreenshot(n.id), 'wide'));
+    if (a.source === 'area') b.appendChild(btn('📐 다시 캡처해서 구현', '기획서를 고친 뒤 이 영역 아래 화면을 다시 캡처해요', () => AP.captureUnder(n.id), 'wide'));
+    else b.appendChild(btn('스크린샷 바꾸기', '새 스크린샷으로 다시 구현', () => AP.pickScreenshot(n.id), 'wide'));
     box.appendChild(b);
   }
   const st = aiState || {};

@@ -4,7 +4,7 @@
 import * as M from './model.js';
 import * as O from './ops.js';
 import * as Ed from './editor.js';
-import { collectDescriptions, esc } from './render.js';
+import { collectDescriptions, esc, renderFrame, fitText } from './render.js';
 import * as API from './api.js';
 
 const E = new Proxy({}, { get: (_, k) => Ed.E[k], set: (_, k, v) => { Ed.E[k] = v; return true; } });
@@ -43,13 +43,20 @@ function descContext(n, fid) {
   const cw = a.cw || n.w, ch = a.ch || n.h;
   const k = Math.min(n.w / cw, n.h / ch);
   const ox = n.x + (n.w - cw * k) / 2, oy = n.y + (n.h - ch * k) / 2;
-  return list.map((d) => {
-    const cx = d.x + (d.w || 18) / 2, cy = d.y + (d.h || 18) / 2;
-    const inside = d.marker !== false && cx >= n.x && cx <= n.x + n.w && cy >= n.y && cy <= n.y + n.h;
+  const out = [];
+  // 번호는 보통 요소 옆에 붙인다 → 기획서 영역 인터랙션은 가장자리 바깥 24px 안의 번호도 이 영역 것으로 (가장자리에 붙여서)
+  const pad = a.source === 'area' ? 24 : 0;
+  for (const d of list) {
+    let cx = d.x + (d.w || 18) / 2, cy = d.y + (d.h || 18) / 2;
+    const inside = d.marker !== false && cx >= n.x - pad && cx <= n.x + n.w + pad && cy >= n.y - pad && cy <= n.y + n.h + pad;
+    if (inside) { cx = Math.min(n.x + n.w, Math.max(n.x, cx)); cy = Math.min(n.y + n.h, Math.max(n.y, cy)); }
+    // 기획서 영역에서 만든 인터랙션: 다른 영역에 번호가 붙은 Description은 빼고, 이 영역의 번호 + 패널에만 있는 것만
+    if (a.source === 'area' && d.marker !== false && !inside) continue;
     const o = { num: String(d.num), title: d.title || '', body: d.body || '', color: d.color };
     if (inside) { o.x = Math.round((cx - ox) / k); o.y = Math.round((cy - oy) / k); }
-    return o;
-  });
+    out.push(o);
+  }
+  return out;
 }
 
 export async function implementFromFile(id, file) {
@@ -86,6 +93,123 @@ export async function fromImage(id) {
   await generate(hs.id);
 }
 
+// ---------- 기획서의 영역을 골라 인터랙션 추가 ----------
+// 고른 객체들이 차지한 영역을 기획서 그대로 캡처(html2canvas) → 그 위에 인터랙션 영역 → 영역 안 Description · 글자를 근거로 자동 구현.
+// 원래 객체는 그대로 두고(지우지 않음), 인터랙션 영역은 고른 객체 바로 위 · Description 번호 아래에 둔다.
+const CAPTURE_SCALE = 2;
+let h2c = null;
+function loadH2C() {
+  if (window.html2canvas) return Promise.resolve(window.html2canvas);
+  return h2c || (h2c = new Promise((ok, no) => {
+    const sc = document.createElement('script');
+    sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+    sc.onload = () => ok(window.html2canvas);
+    sc.onerror = () => { h2c = null; no(new Error('화면 캡처 도구를 불러오지 못했어요 (인터넷 연결을 확인하세요)')); };
+    document.head.appendChild(sc);
+  }));
+}
+// 캡처에서 뺄 것: 기획 주석(Description 번호 · 빨간 점선 박스 · 주석선 · 하위 번호 원) — 화면이 아니라 설명이다
+function annotationIds(nodes) {
+  const out = new Set();
+  O.walk(nodes, (n) => {
+    if (n.type === 'connector' || n.type === 'description' || n.type === 'hotspot') out.add(n.id);
+    else if (n.type === 'shape' && (((!n.fill || n.fill === 'none') && n.dash) || /^(번호 |주석)/.test(n.name || ''))) out.add(n.id);
+  });
+  return out;
+}
+export async function captureRegion(fid, box) {
+  const f = E.idx.get(fid);
+  const html2canvas = await loadH2C();
+  const host = document.createElement('div');
+  host.style.cssText = 'position:fixed;left:0;top:0;z-index:-1;pointer-events:none';
+  const fr = renderFrame(f, { doc: E.doc, idx: E.idx, mode: 'present', noEmbed: true, pageNo: 1 });
+  host.appendChild(fr);
+  document.body.appendChild(host);
+  try {
+    fitText(host);
+    await Promise.all([...host.querySelectorAll('img')].map((im) => (im.decode ? im.decode().catch(() => {}) : null)));
+    if (document.fonts && document.fonts.ready) await document.fonts.ready;
+    const skip = annotationIds(f.nodes);
+    const r = fr.getBoundingClientRect();
+    const canvas = await html2canvas(fr, {
+      x: r.left + box.x, y: r.top + box.y, width: box.w, height: box.h, scale: CAPTURE_SCALE,
+      backgroundColor: '#ffffff', logging: false, scrollX: 0, scrollY: 0,
+      ignoreElements: (el) => !!(el.dataset && el.dataset.id && skip.has(el.dataset.id)),
+    });
+    let data = canvas.toDataURL('image/png');
+    if (data.length > 3.5e6) data = canvas.toDataURL('image/jpeg', 0.9);
+    return { data, w: canvas.width, h: canvas.height, mime: data.slice(5, data.indexOf(';')) };
+  } finally {
+    host.remove();
+  }
+}
+// 영역 안 기획서 글자 (AI가 스크린샷을 읽어 옮기는 대신 정확한 표기를 쓰게) — 스크린샷 좌표로
+const plain = (runs) => (runs || []).map((r) => r.t || '').join('').trim();
+function regionTexts(n, fid) {
+  const f = E.idx.get(fid);
+  const k = ((n.action && n.action.cw) || n.w) / n.w;
+  const out = [];
+  O.walk(f.nodes, (t) => {
+    if (t.hidden || !['text', 'shape', 'table'].includes(t.type)) return;
+    const b = M.bounds(t, E.idx);
+    const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+    if (cx < n.x || cx > n.x + n.w || cy < n.y || cy > n.y + n.h) return;
+    const txt = t.type === 'table' ? t.rows.map((r) => r.cells.map((c) => (c ? plain(c.runs) : '')).join(' | ')).join(' / ') : plain(t.runs);
+    if (txt) out.push({ t: txt.slice(0, 400), x: Math.round((b.x - n.x) * k), y: Math.round((b.y - n.y) * k) });
+  });
+  return out.slice(0, 120);
+}
+// 프레임 맨 위 목록에서의 위치 (그룹 안 객체면 그 그룹의 위치)
+function topIndex(f, id) {
+  let e = E.idx.entry(id);
+  while (e && e.parent && e.parent !== f) e = E.idx.entry(e.parent.id);
+  return e ? f.nodes.indexOf(e.obj) : -1;
+}
+export async function addToSelection(sel) {
+  const ids = O.topLevel(E.idx, sel || E.sel).filter((id) => { const t = E.idx.get(id); return t && !['description', 'hotspot', 'connector'].includes(t.type); });
+  if (!ids.length) { Ed.toast('인터랙션을 넣을 화면 객체를 먼저 고르세요.'); return; }
+  const fid = Ed.frameOfNode(ids[0]);
+  const f = E.idx.get(fid);
+  if (!f || f.kind !== 'frame') { Ed.toast('프레임 안의 객체에만 인터랙션을 넣을 수 있어요.'); return; }
+  const sb = O.selectionBox(E.idx, ids);
+  const box = { x: Math.max(0, Math.floor(sb.x)), y: Math.max(0, Math.floor(sb.y)) };
+  box.w = Math.min(E.doc.size.w, Math.ceil(sb.x + sb.w)) - box.x;
+  box.h = Math.min(E.doc.size.h, Math.ceil(sb.y + sb.h)) - box.y;
+  if (box.w < 16 || box.h < 16) { Ed.toast('영역이 너무 작아요.'); return; }
+  Ed.toast('고른 영역을 기획서 그대로 캡처하는 중…');
+  let shot;
+  try { shot = await captureRegion(fid, box); } catch (err) { Ed.toast(err.message, true); return; }
+  const aid = M.uid('img');
+  const index = Math.max(...ids.map((id) => topIndex(f, id))) + 1;
+  const first = E.idx.get(ids[0]);
+  const hs = M.createNode('hotspot', { name: '인터랙션 · ' + ((ids.length === 1 && first.name) || '영역'), x: box.x, y: box.y, w: box.w, h: box.h,
+    action: { type: 'html', shot: aid, cw: shot.w, ch: shot.h, fit: 'stretch', source: 'area' } });
+  const ok = Ed.commit([
+    { op: 'set', id: 'doc', key: 'assets.' + aid, value: { mime: shot.mime, data: shot.data, w: shot.w, h: shot.h, name: '기획서 영역 캡처' } },
+    { op: 'insert', parent: f.id, index: index > 0 ? index : null, item: hs },
+  ], '영역에 인터랙션 추가');
+  if (!ok) return;
+  Ed.select([hs.id]);
+  await generate(hs.id);
+}
+// 이미 그린 인터랙션 영역: 그 아래 기획서 화면을 캡처해 자동 구현
+export async function captureUnder(id) {
+  const n = E.idx.get(id);
+  if (!n) return;
+  const fid = Ed.frameOfNode(id);
+  Ed.toast('영역 아래 기획서 화면을 캡처하는 중…');
+  let shot;
+  try { shot = await captureRegion(fid, { x: n.x, y: n.y, w: n.w, h: n.h }); } catch (err) { Ed.toast(err.message, true); return; }
+  const aid = M.uid('img');
+  const a = Object.assign({}, n.action || {}, { type: 'html', shot: aid, cw: shot.w, ch: shot.h, fit: 'stretch', source: 'area' });
+  for (const k of ['asset', 'src', 'html', 'gen']) delete a[k];
+  if (!Ed.commit([
+    { op: 'set', id: 'doc', key: 'assets.' + aid, value: { mime: shot.mime, data: shot.data, w: shot.w, h: shot.h, name: '기획서 영역 캡처' } },
+    { op: 'set', id, key: 'action', value: a },
+  ], '영역 캡처')) return;
+  await generate(id);
+}
+
 // 같은 스크린샷으로 다시 만들기 (추가 요청 반영)
 export async function generate(id, request) {
   const n = E.idx.get(id);
@@ -102,7 +226,7 @@ export async function generate(id, request) {
   let html = null, gen = null, why = '';
   const r = await API.call('/api/screen2html', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ image: shot.data, w: a.cw, h: a.ch, frame: f ? f.name : '', descriptions: descs, request: request || a.request || '' }),
+    body: JSON.stringify({ image: shot.data, w: a.cw, h: a.ch, frame: f ? f.name : '', descriptions: descs, texts: a.source === 'area' ? regionTexts(n, fid) : [], request: request || a.request || '' }),
   }, true);   // AI 자동 구현은 이 PC의 Spec Studio 서버(API 키)에서만
   if (r.offline) why = 'Spec Studio 서버(tools/serve.py)에 연결할 수 없어 기본 프로토타입으로 만들었어요.';
   else {

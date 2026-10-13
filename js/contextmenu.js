@@ -301,13 +301,16 @@ function forHotspot(n) {
   const hasContent = !!(a.asset || a.src || a.html);
   if (a.type === 'html' && !hasContent) return [
     { label: a.shot ? '자동 구현' : '화면 스크린샷 올리기…', kbd: '더블클릭', act: () => (a.shot ? AP.generate(n.id) : AP.pickScreenshot(n.id)), bold: true, disabled: E.embBusy.has(n.id) },
+    { label: '📐 아래 기획서 화면으로 자동 구현', act: () => AP.captureUnder(n.id), disabled: E.embBusy.has(n.id) },
     ...(a.shot ? [{ label: '스크린샷 바꾸기…', act: () => AP.pickScreenshot(n.id) }] : []),
     { label: 'HTML 파일 넣기…', act: () => { const i = document.createElement('input'); i.type = 'file'; i.accept = '.html,.htm,text/html'; i.onchange = async () => { const f = i.files[0]; if (!f) return; const r = Ed.htmlAssetOps(await f.text(), f.name); r.ops.push({ op: 'set', id: n.id, key: 'action', value: Object.assign({ cw: 1080, ch: 720, fit: 'contain' }, a, { asset: r.aid }) }); Ed.commit(r.ops, 'HTML 프로토타입 넣기'); }; i.click(); } },
     { label: '일반 인터랙션 영역으로 (이동 · 링크 · 메모)', act: () => Ed.commit([{ op: 'set', id: n.id, key: 'action', value: { type: 'none' } }], '인터랙션 동작') },
   ];
   if (a.type === 'html') return [
     { label: E.liveEmbed === n.id ? '■ 체험 끝내기' : '▶ 여기서 체험', kbd: '더블클릭', act: () => (E.liveEmbed === n.id ? Ed.stopLiveEmbed() : Ed.startLiveEmbed(n.id)), bold: true },
-    ...(a.shot ? [{ label: '다시 자동 구현', act: () => AP.generate(n.id), disabled: E.embBusy.has(n.id) }, { label: '스크린샷 바꾸고 다시 구현…', act: () => AP.pickScreenshot(n.id) }] : [{ label: '화면 스크린샷으로 자동 구현…', act: () => AP.pickScreenshot(n.id) }]),
+    ...(a.shot ? [{ label: '다시 자동 구현', act: () => AP.generate(n.id), disabled: E.embBusy.has(n.id) },
+      a.source === 'area' ? { label: '📐 아래 기획서 화면 다시 캡처해서 구현', act: () => AP.captureUnder(n.id), disabled: E.embBusy.has(n.id) } : { label: '스크린샷 바꾸고 다시 구현…', act: () => AP.pickScreenshot(n.id) }]
+      : [{ label: '화면 스크린샷으로 자동 구현…', act: () => AP.pickScreenshot(n.id) }]),
     { label: 'HTML 바꾸기 (파일)…', act: () => { const i = document.createElement('input'); i.type = 'file'; i.accept = '.html,.htm,text/html'; i.onchange = async () => { const f = i.files[0]; if (!f) return; const r = Ed.htmlAssetOps(await f.text(), f.name); r.ops.push({ op: 'set', id: n.id, key: 'action', value: Object.assign({}, a, { asset: r.aid, src: undefined, html: undefined }) }); Ed.commit(r.ops, 'HTML 프로토타입 내용'); }; i.click(); } },
     { label: '원래 크기', sub: [['데스크톱 1080×720', 1080, 720], ['노트북 1280×800', 1280, 800], ['모바일 360×640', 360, 640]].map(([l, w, h]) => ({ label: l, check: a.cw === w && a.ch === h, act: () => Ed.commit([{ op: 'set', id: n.id, key: 'action.cw', value: w }, { op: 'set', id: n.id, key: 'action.ch', value: h }], '프로토타입 크기') })) },
     { label: '영역을 원래 비율로', act: () => { const cw = a.cw || n.w, ch = a.ch || n.h; Ed.commit([{ op: 'set', id: n.id, key: 'h', value: O.R(n.w * ch / cw) }], '원래 비율'); } },
@@ -414,7 +417,11 @@ function itemsFor(ctx) {
   else if (type === 'hotspot' && sel.length === 1) own = forHotspot(n);
   else if (type === 'instance' && sel.length === 1) own = forInstance(n, ctx);
   else if (type === 'group' && sel.length === 1) own = forGroup(n);
-  return head.concat(own, common(ctx));
+  // 기획서의 화면 객체(하나 · 여러 개 · 그룹)를 골랐으면: 그 영역을 그대로 인터랙션으로
+  const screenSel = sel.filter((k) => !['description', 'hotspot', 'connector'].includes(k.type));
+  const inFrame = E.idx.containerOf(n.id) && E.idx.containerOf(n.id).kind === 'frame';
+  const ia = screenSel.length && inFrame ? [{ label: '⚡ 이 영역에 인터랙션 기능 추가', kbd: sel.length > 1 ? `${screenSel.length}개 영역` : '', bold: true, act: () => AP.addToSelection(screenSel.map((k) => k.id)) }, SEP] : [];
+  return head.concat(ia, own, common(ctx));
 }
 function typeTitle(n) {
   const T = { text: '글', image: '이미지', table: '표', shape: '도형', connector: '선', description: 'Description', hotspot: '인터랙션 영역', group: '그룹', instance: '인스턴스' };
